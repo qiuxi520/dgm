@@ -1,4 +1,6 @@
 import asyncio
+# 中文导读：命令工具让代理在容器内查看仓库、运行测试和安装依赖，是执行动作的入口。
+# tool_info 的英文描述会发送给基础模型；中文解释以注释呈现，保留原有协议文字。
 import os
 
 def tool_info():
@@ -25,6 +27,8 @@ def tool_info():
     }
 
 class BashSession:
+    # 在一次会话内通过交互式 Bash 执行命令，以 sentinel 标记命令输出结束。
+    # 使用 /bin/bash 和 os.setsid，预期运行环境为 Linux（通常是 Docker 容器）。
     """A session of a bash shell."""
     def __init__(self):
         self._started = False
@@ -66,6 +70,8 @@ class BashSession:
             )
         
         # Send command
+        # 命令后追加标记输出；轮询 stdout 缓冲区直到看到标记或达到 120 秒期限。
+        # 标记用于判断结束，不包含命令退出码；stderr 会单独拼接为错误文本。
         self._process.stdin.write(
             command.encode() + f"; echo '{self._sentinel}'\n".encode()
         )
@@ -129,6 +135,9 @@ def filter_error(error):
     return '\n'.join(filtered_lines).strip()
 
 async def tool_function_call(command):
+    # 阅读注意：每次调用都新建 BashSession，并没有复用上次的 shell。
+    # 因而文件改动可持续存在，但 cd、export 等 shell 状态不会自动跨工具调用保留；
+    # 原 tool_info 中“状态持久”的表述需结合此实现理解。当前也未显式调用 stop 清理。
     """Execute a command in the bash shell."""
     try:
         bash_session = BashSession()

@@ -1,3 +1,6 @@
+# 中文导读：一次 DGM 变异的完整闭环。本文件衔接“诊断模型”和“可修改代码的代理”。
+# 先重建父代 → 诊断失败 → 在容器中让父代编辑 /dgm → 导出增量补丁 → 基准评估。
+# 诊断模型生成改进任务，coding_agent 执行任务，基准测试提供分数；三者职责不同。
 import argparse
 import datetime
 import json
@@ -28,6 +31,9 @@ dataset = None
 diagnose_model = 'o1-2024-12-17'
 
 def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False):
+    # 从失败日志、代理源码和评测证据构造上下文，请模型提出一个通用能力改进。
+    # 解析 JSON 后只把 implementation_suggestion 和 problem_description 等内容
+    # 整理为代理可以实施的任务；解析失败递归重试，初次调用之外最多再试 max_attempts 次。
     client = create_client(diagnose_model)
     if polyglot:
         diagnose_sys_message, diagnose_prompt = get_diagnose_prompt_polyglot(
@@ -70,6 +76,8 @@ def diagnose_improvement(
         entry, parent_commit, root_dir, model_patch_file, out_dir, run_id,
         patch_files=[], max_attempts=3,
     ):
+    # 可选的事后文字分析，比较父代与子代解题轨迹；不参与外层的分数抽样公式。
+    # 注意：对应提示构造器目前与日志函数的参数/返回值不一致，见该文件中文注释。
     """
     Diagnose the improvement of the model patch.
 
@@ -118,11 +126,15 @@ def diagnose_improvement(
     return improvement_diagnosis
 
 def save_metadata(metadata, output_dir):
+    # 节点元数据连接谱系与评测：run_id、parent_commit、entry、改进任务、性能等。
     metadata_file = os.path.join(output_dir, "metadata.json")
     with open(metadata_file, 'w') as f:
         json.dump(metadata, f, indent=4)
 
 def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more):
+    # 两种补丁需要区分：patch_files 改的是代理自身；harness 输出改的是基准题仓库。
+    # harness 先让新代理解题，make_report 再用 SWE-bench 官方测试判断题目是否解决。
+    # num_evals 表示重复解题次数，用于观察随机性；结果按提交实例总数聚合为解题率。
     safe_log('Start harness')
     test_task_list = [entry] if test_task_list is None else test_task_list
     dnames = harness(
@@ -150,6 +162,8 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
     safe_log("End of evaluation")
 
     # Check if additional evaluation should be run
+    # 达到阈值才扩展到 medium 子集以控制评估成本；这里比较成功实例数与题数乘阈值，
+    # 多次重复评估时成功数也累加，因此并不等价于比较 accuracy_score 与阈值。
     if (overall_performance and \
         test_more_threshold is not None and test_task_list_more is not None and \
             overall_performance.get('total_resolved_instances', 0) >= len(test_task_list) * test_more_threshold):
@@ -178,6 +192,9 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
         safe_log("End of evaluation more")
 
 def run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more):
+    # Polyglot 在 harness 内直接测试和写报告，无需再调用 SWE 的 make_report。
+    # 追加评估写入 overall_performance_deep；外层抽样仍读取 overall_performance。
+    # 当前 Polyglot harness 显式限制 num_evals <= 1。
     safe_log('Start harness')
     test_task_list = [entry] if test_task_list is None else test_task_list
     safe_log(f'workers {min(10, len(test_task_list))}')
@@ -236,8 +253,12 @@ def self_improve(
     run_baseline=None,
     polyglot=False
 ):  
+    # parent_commit 实际是档案节点 ID（initial 或时间戳），不是 Git commit hash。
+    # 每个节点目录保存相对父代的增量，重建时必须按祖先到父代的顺序应用整条补丁链。
+    # full_eval_threshold 当前未被使用；下面虽加载 big 子集，也没有执行 big 评估。
 
     global dataset
+    # 数据供诊断使用；此处是模块全局变量，外层线程之间共享同一数据引用。
     if polyglot:
         with open("polyglot/polyglot_benchmark_metadata.json") as f:
             dataset = json.loads(f.read())
@@ -275,6 +296,8 @@ def self_improve(
 
     if polyglot:
         # remove the swe version of coding_agent.py
+        # 在容器里统一入口名：Polyglot 版本替换为 /dgm/coding_agent.py，
+        # 之后的自修改补丁和评估器都针对这个统一路径工作。
         exec_result = container.exec_run("rm /dgm/coding_agent.py", workdir='/')
         log_container_output(exec_result)
         # rename coding_agent_polyglot.py to coding_agent.py
@@ -291,6 +314,7 @@ def self_improve(
 
     # Find all parent patches and apply them
     patch_files = get_model_patch_paths(root_dir, os.path.join(output_dir, '../'), parent_commit)
+    # no_selfimprove 消融在变异容器里跳过祖先补丁，编辑初始代码；普通路径恢复父代。
     if run_baseline not in ['no_selfimprove']:
         for patch_file in patch_files:
             copy_to_container(container, patch_file, '/dgm/parent_patch.txt')
@@ -300,6 +324,8 @@ def self_improve(
             log_container_output(exec_result)
 
     # Commit this version of dgm, so that irrelevant changes are not included in the patch
+    # 父代代码作为新的 Git 基线：最终 diff 仅记录本次变异，不重复包含祖先改动。
+    # 这里的 commit_hash 才是真正传给 git diff 的提交标识。
     exec_result = container.exec_run("git add --all", workdir='/dgm/')
     log_container_output(exec_result)
     exec_result = container.exec_run("git -c user.name='user' -c user.email='you@example.com' commit -m 'a nonsense commit message'", workdir='/dgm/')
@@ -313,6 +339,7 @@ def self_improve(
     log_container_output(exec_result)
 
     # Get tasks to improve
+    # 先解释“代理为什么失败”，再把改进任务交给代理实现；不是直接照抄题目答案。
     if entry:
         safe_log(f"Task to improve: {entry}")
         problem_statement = diagnose_problem(entry, parent_commit, root_dir, out_dir_base, patch_files=patch_files, polyglot=polyglot)
@@ -345,6 +372,8 @@ def self_improve(
         "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
     }
     cmd = [
+        # 同一个编程代理也能编辑自己的实现：--git_dir 从解题时的 /testbed/
+        # 换成 /dgm/，目标变为工具、提示词和工作流；30 分钟超时由 Linux timeout 执行。
         "timeout", "1800",  # 30min timeout
         "python", "/dgm/coding_agent.py",
         "--problem_statement", problem_statement,
@@ -379,6 +408,7 @@ def self_improve(
         return metadata
 
     patch_files.append(model_patch_file)
+    # 补丁链 = 祖先补丁 + 本次增量；评估时在新容器中重放它，测试得到的子代代理。
 
     # Stop and remove the container
     cleanup_container(container)
@@ -399,6 +429,9 @@ def self_improve(
             safe_log(f"Error while evaluating the self-improvement: {e}")
 
     # Post-self-improvement diagnosis
+    # 性能结论由基准结果提供；这里的模型文字诊断是辅助解释，不能替代测试分数。
+    # 直接调用 is_compiled_self_improve 未传 logger 和非空题数列表，当前实现存在
+    # None.info / 空列表索引风险；外层 filter_compiled 的调用则提供了这些参数。
     if post_improve_diagnose:
         safe_log("Diagnosing the self-improvement")
         metadata['is_compiled'] = is_compiled_self_improve(metadata)

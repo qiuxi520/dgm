@@ -1,6 +1,8 @@
 import os
 
 def get_tooluse_prompt():
+    # 将工具源码展示给不支持原生工具调用的模型，并规定 <tool_use> 文本协议。
+    # 新增工具文件也会被扫描进提示；原生 Claude/o3 路径直接使用 tool_info schema。
     """
     Get the prompt for using the available tools.
     Prompt needed for LLMs without in-built tool calling.

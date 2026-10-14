@@ -1,4 +1,5 @@
 import random
+# 中文导读：代理内部的测试报告整理和候选补丁比较；与外层的官方基准解题率不同。
 from llm import create_client, extract_json_between_markers, get_response_from_llm
 from llm_withtools import convert_msg_history
 from utils.swe_log_parsers import MAP_REPO_TO_PARSER
@@ -20,6 +21,7 @@ def parse_eval_output(instance_id, eval_output):
         return {}
 
 def msg_history_to_report(instance_id, msg_history, model=None):
+    # 从历史末尾向前查找工具结果，用目标仓库对应的日志解析器提取测试状态。
     """
     Get test report from the message history.
     """
@@ -40,6 +42,7 @@ def msg_history_to_report(instance_id, msg_history, model=None):
     return {}
 
 def get_report_score(test_report):
+    # 这里是“单份测试报告的通过比例”，不是跨基准题的 accuracy_score。
     """
     Get the score from the test report.
     """
@@ -49,6 +52,8 @@ def get_report_score(test_report):
     return passed_count / total_count if total_count > 0 else 0
 
 def score_tie_breaker(problem_statement, code_diffs, test_reports, best_score_indices=[], logging=print):
+    # 多个候选得分相同时让 o1 辅助比较；若调用或解析失败，回退到首个候选。
+    # 初始 coding_agent.forward 没有调用这些函数，它们可供后续进化工作流使用。
     """
     Use LLM as a tiebreaker to choose the best code diff.
     """

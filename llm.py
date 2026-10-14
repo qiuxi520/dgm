@@ -1,5 +1,7 @@
 # Code adapted from https://github.com/SakanaAI/AI-Scientist/blob/main/ai_scientist/llm.py.
 import json
+# 中文导读：基础模型客户端与纯文本请求封装，主要用于失败诊断和报告整理。
+# 这里提供 API 调用而非自进化算法；真正执行编辑工具的循环在 llm_withtools.py。
 import os
 import re
 
@@ -42,6 +44,8 @@ AVAILABLE_LLMS = [
 ]
 
 def create_client(model: str):
+    # 返回 (客户端, 供应商接受的模型名)；例如 bedrock/ 前缀只用于选择客户端，
+    # 发请求前会去掉路由前缀。环境变量提供凭据，不在源码中保存密钥。
     """
     Create and return an LLM client based on the specified model.
     Args:
@@ -178,6 +182,8 @@ def get_response_from_llm(
         msg_history=None,
         temperature=0.7,
 ):
+    # 返回 (响应文本, 追加后的对话历史)，各供应商的历史格式在分支中适配。
+    # 诊断使用的 o1/o3 分支把 system_message 拼接进 user 消息，温度固定为 1。
     if msg_history is None:
         msg_history = []
 
@@ -303,6 +309,8 @@ def get_response_from_llm(
     return content, new_msg_history
 
 def extract_json_between_markers(llm_output):
+    # 优先解析 ```json 代码块，再尝试从普通文本中抽取 JSON，并清理非法控制字符。
+    # 解析失败返回 None，由诊断函数重试；兜底非贪婪正则不能可靠解析任意嵌套对象。
     inside_json_block = False
     json_lines = []
     

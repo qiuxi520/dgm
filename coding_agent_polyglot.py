@@ -1,3 +1,5 @@
+# 中文导读：多语言基准使用的初始代理；自修改容器中会重命名为 coding_agent.py。
+# 与 SWE 版本共享工具循环与补丁导出机制，但自修改时切换到 OPENAI_MODEL。
 import argparse
 import subprocess
 import logging
@@ -31,6 +33,7 @@ CPP_TEST_COMMANDS = [
 ]
 
 TEST_COMMANDS = {
+    # 各语言测试命令的映射；当前 forward 未直接读取这张表，官方测试由 polyglot/harness.py 执行。
     "python": [["pytest", "-rA", "--tb=long"]],
     "rust": [["cargo", "test", "--", "--include-ignored"]],
     "go": [["go", "test", "./..."]],
@@ -94,6 +97,7 @@ def safe_log(message, level=logging.INFO):
         print(f"Warning: No logger found for thread {threading.get_ident()}")
 
 class AgenticSystem:
+    # language 记录题目语言；当前 forward 没有按 language 构造额外分支。
     def __init__(
             self,
             problem_statement,
@@ -114,6 +118,7 @@ class AgenticSystem:
 
         # Set the code model based on whether self-improvement is enabled
         self.code_model = CLAUDE_MODEL if not self_improve else OPENAI_MODEL
+        # 解题使用 Claude、自修改使用 o3；这只是调用不同基础模型，不是训练或更新模型。
 
         # Initialize logger and store it in thread-local storage
         self.logger = setup_logger(chat_history_file)
@@ -123,6 +128,7 @@ class AgenticSystem:
             f.write('')
 
     def get_current_edits(self):
+        # 注意此版本返回包装后的 user 消息列表，SWE 版本同名方法返回 diff 字符串。
         diff = str(diff_versus_commit(self.git_tempdir, self.base_commit))
         new_msg_history = [
             {
@@ -138,6 +144,8 @@ class AgenticSystem:
         return new_msg_history
 
     def forward(self):
+        # 初始流程只执行一次 chat_with_agent，由其内部持续处理工具调用直至结束。
+        # test_description 虽保存于对象，但当前 task 提示没有插入该字段。
         """
         The forward function for the AgenticSystem.
         """
@@ -179,6 +187,7 @@ def main():
     agentic_system.forward()
 
     # Get code diff and save to model_patch.diff
+    # 工作区修改统一导出为 diff；进化时的 Git 基线已包含父代补丁，所以这里只包含新变异。
     model_patch = diff_versus_commit(args.git_dir, args.base_commit)
     model_patch_outfile = os.path.join(args.outdir, 'model_patch.diff') if args.outdir else 'model_patch.diff'
     with open(model_patch_outfile, 'w') as f:

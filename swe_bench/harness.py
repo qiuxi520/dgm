@@ -1,4 +1,7 @@
 import argparse
+# 中文导读：把某个 DGM 代理版本放到 SWE-bench 各题的环境里生成解题补丁。
+# /dgm 保存代理，/testbed 保存被修复仓库；这两个目录对应两种不同的代码修改。
+# 本文件负责“让代理解题”，官方验收和汇总报告由 swe_bench/report.py 完成。
 import datetime
 import json
 import os
@@ -22,6 +25,8 @@ from swe_bench.utils import (
 from utils.common_utils import load_json_file
 
 def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
+    # 每题一个容器，先装入初始代理并叠加 model_patch_paths，恢复待测版本；
+    # 再让该版本编辑 /testbed，将模型对话和该题解题 diff 保存到 predictions。
     """
     Process a single dataset entry. This function encapsulates the main processing logic
     for each entry to make it suitable for parallel execution.
@@ -96,6 +101,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         test_description = get_test_description(eval_script=eval_script, swerepo=True)
 
         # Apply model patch
+        # 这些补丁修改 /dgm 的代理本身，而不是当前 SWE 题目的 /testbed 仓库。
         if model_patch_paths:
             safe_log("Applying model patches")
             for model_patch_path in model_patch_paths:
@@ -191,6 +197,8 @@ def harness(
         num_evals_parallel=1,
         pred_dname='./swe_bench/predictions',
     ):
+    # 两级线程池：外级处理重复评估轮次，内级处理同一轮的多道题。
+    # 返回每轮预测目录列表；model_name_or_path 通常是代理版本 ID，并非基础模型名。
     """
     Parallel processing harness using ThreadPoolExecutor.
     

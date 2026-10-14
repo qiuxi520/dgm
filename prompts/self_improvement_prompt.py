@@ -1,4 +1,7 @@
 import os
+# 中文导读：把失败证据转化为“如何改进代理”的任务，而不是只修复一道基准题。
+# 英文字符串是实际发送给模型的提示词；中文注释解释结构，保留原提示与 JSON 字段名。
+# 诊断依据包括代理源码、解题日志、解题补丁、官方测试结果；输出聚焦一个通用能力改进。
 import json
 
 from utils.common_utils import load_json_file, read_file
@@ -175,12 +178,15 @@ problem_description_prompt = """# To Implement\n\n{implementation_suggestion}\n\
 
 
 def get_problem_description_prompt(response_json, is_polyglot=False):
+    # 将代理架构说明与诊断 JSON 中的实施建议、问题描述拼接成自修改任务。
+    # 两个关键字段名必须保持英文，因为诊断输出与这里的字典访问形成固定契约。
     if is_polyglot:
         return coding_agent_summary_polyglot + problem_description_prompt.format(implementation_suggestion=response_json["implementation_suggestion"], problem_description=response_json["problem_description"])
     else:
         return coding_agent_summary + problem_description_prompt.format(implementation_suggestion=response_json["implementation_suggestion"], problem_description=response_json["problem_description"])
 
 def read_mdlog_file(filepath, filter=True):
+    # 默认删除以指定 API 错误开头的行，减少诊断噪声；检查上下文溢出时会关闭过滤。
     if not filter:
         return read_file(filepath)
 
@@ -198,6 +204,8 @@ def read_mdlog_file(filepath, filter=True):
     return "\n".join(filtered_lines).strip()
 
 def find_selfimprove_eval_logs(entry, out_dir, commit_id='initial', filter=True):
+    # 从一个代理节点的多次评估目录收集四类证据：对话日志、测试日志、解题补丁、结果标签。
+    # 若没有 *_eval.md，则回退到 SWE 官方 report.json；返回的是四个列表。
     predictions_dir = os.path.join(out_dir, commit_id, 'predictions')
     all_preds_folders = [f for f in os.listdir(predictions_dir) if os.path.isdir(os.path.join(predictions_dir, f))]
     prediction_log_files = [os.path.join(predictions_dir, f, f"{entry}.md") for f in all_preds_folders]
@@ -239,6 +247,7 @@ def find_selfimprove_eval_logs(entry, out_dir, commit_id='initial', filter=True)
     return md_logs, eval_logs, predicted_patches, eval_results
 
 def process_selfimprove_eval_logs(md_logs, eval_logs, predicted_patches, eval_results):
+    # 当前只取各列表第一份证据，不汇总重复评估；对话按字符数裁到 250000，非 token 数。
     # NOTE: using only the first logs
     md_log = md_logs[0] if md_logs else "No logs available."
     eval_log = eval_logs[0] if eval_logs else "No test results available. Assume all tests failed."
@@ -303,6 +312,9 @@ In <JSON>, provide a JSON response with the following fields:
 Your response will be automatically parsed, so ensure that the string response is precisely in the correct format. Do NOT include the `<JSON>` tag in your output."""
 
 def get_diagnose_prompt_swe(entry_id, commit, root_dir, out_dir, dataset, patch_files=[]):
+    # 特殊标签走通用诊断模板；题目 ID 则注入该题日志、问题和官方私有测试。
+    # 私有测试用于事后诊断；diagnose_prompt 明确提示解题评估时代理看不到这些测试。
+    # 虽读取 answer_patch 并传入 format，但当前模板没有 {answer_patch} 占位符。
     if entry_id == 'solve_empty_patches':
         # Get user prompt for solving empty patches
         diagnose_prompt_out = diagnose_prompt_emptypatches
@@ -336,6 +348,8 @@ def get_diagnose_prompt_swe(entry_id, commit, root_dir, out_dir, dataset, patch_
     return diagnose_system_message_out, diagnose_prompt_out
 
 def get_diagnose_prompt_polyglot(entry_id, commit, root_dir, out_dir, dataset, patch_files=[]):
+    # 先收集具体题目证据；有 25% 概率诊断随机性，其余按空补丁或普通失败路径处理。
+    # dataset 中的 language 字段用于识别多语言题；源码入口替换为 Polyglot 版本。
 
     md_logs, eval_logs, predicted_patches, eval_results = find_selfimprove_eval_logs(entry_id, out_dir, commit_id=commit)
     md_log, eval_log, predicted_patch, eval_result = process_selfimprove_eval_logs(md_logs, eval_logs, predicted_patches, eval_results)
@@ -369,6 +383,7 @@ def get_diagnose_prompt_polyglot(entry_id, commit, root_dir, out_dir, dataset, p
 
 
 def get_eval_log_text(eval_json, test_status=None):
+    # FAIL_TO_PASS 检验新问题是否修好，PASS_TO_PASS 检验原来通过的测试是否回归。
     if not test_status:
         first_key = next(iter(eval_json))
         tests_status = eval_json[first_key].get('tests_status', {})
@@ -407,6 +422,8 @@ def get_eval_log_text(eval_json, test_status=None):
     return "\n".join(result_parts) if result_parts else "No test results available. Assume all tests failed."
 
 def get_current_code(current_dir, code_files, patch_files=None, exclude_files=None, is_polyglot=False):
+    # 实际输出是“基础源码文本 + 依序附加的补丁文本”，并没有在磁盘上应用补丁。
+    # 诊断模型据此理解父代；真正恢复可执行父代发生在 self_improve_step 的容器中。
     """
     Retrieves the contents of specified Python files/directories, optionally
     applying patches. Also allows excluding specific files from the result.

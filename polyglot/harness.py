@@ -1,4 +1,6 @@
 import argparse
+# 中文导读：多语言题的代理运行与官方测试整合在同一 harness 中。
+# 先让代理在题目基线上编辑 solution 文件，再恢复带官方测试的 test_commit 进行验收。
 import datetime
 import json
 import os
@@ -29,6 +31,7 @@ def get_eval_script(commands):
     return "\n".join(["#!/bin/bash", "set -uxo pipefail"] + commands) + "\n"
 
 def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
+    # /dgm 是代理实现，/testbed 是题目仓库；祖先补丁恢复代理，导出的 diff 是解题结果。
     """
     Process a single dataset entry. This function encapsulates the main processing logic
     for each entry to make it suitable for parallel execution.
@@ -159,6 +162,8 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
     
 
         exec_result = container.exec_run("git -C /testbed stash push " + " ".join(entry['files']['solution']), workdir='/')
+        # 仅保留 solution 文件改动，再切到官方测试提交并恢复 solution；
+        # 代理自写/修改的测试不会替代官方验收测试。随后以测试脚本退出码判定 resolved。
         log_container_output(exec_result)
         exec_result = container.exec_run(f"git -C /testbed reset --hard {entry['test_commit']}", workdir='/')
         log_container_output(exec_result)
@@ -245,6 +250,8 @@ def harness(
         pred_dname='./polyglot/predictions',
         output_dir='./polyglot/predictions'
     ):
+    # 实际只支持一次评估；汇总各题 resolved/unresolved/empty_patch/incomplete 状态。
+    # 与 SWE 返回预测目录不同，此实现直接写报告，out_dnames 未被填充，返回空列表。
     """
     Parallel processing harness using ThreadPoolExecutor.
     
@@ -257,6 +264,8 @@ def harness(
         num_evals: Repeated number of swe evaluations
     """
     if model_patch_paths:
+        # 注意下面会直接覆盖传入的补丁文件，排除文件头包含 polyglot 的改动，
+        # 并非只在内存中临时过滤；读取历史实验时需理解这个副作用。
         for model_patch_path in model_patch_paths:
             # Read and modify model patch
             with open(model_patch_path, 'r') as f:

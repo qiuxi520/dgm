@@ -1,4 +1,6 @@
 import io
+# 中文导读：自修改容器的基础设施，与 SWE/Polyglot 题目容器的构建接口不同。
+# 容器提供独立工作区；父代补丁、任务、凭据和结果由 self_improve_step 显式传递。
 import logging
 import threading
 from pathlib import Path
@@ -14,6 +16,7 @@ def get_thread_logger():
     return getattr(_thread_local, 'logger', None)
 
 def setup_logger(log_file):
+    # 日志实例放在线程局部存储中，避免外层并行改进时不同节点的日志混写。
     """
     Set up a thread-safe logger with file handler.
     
@@ -108,6 +111,8 @@ def build_dgm_container(
         container_name='app-container',
         force_rebuild=False,
     ):
+    # 基础镜像包含初始代理代码；谱系改动稍后通过 diff 重放，而不是每个节点都做新镜像。
+    # 此函数已经用 containers.run 启动容器；异常时返回 None，调用方需留意这一点。
     """
     Build the Docker image for the dgm app and start a container from it.
     """
@@ -147,6 +152,7 @@ def cleanup_container(container):
     safe_log(f"Container '{container.name}' removed.")
 
 def copy_to_container(container, source_path: Union[str, Path], dest_path: Union[str, Path]) -> None:
+    # Docker 的 put_archive 接收 tar 字节；文件可改名，目录以其自身名称作为归档根。
     """
     Copy a file or directory from the local system to a Docker container.
     
@@ -194,6 +200,7 @@ def copy_to_container(container, source_path: Union[str, Path], dest_path: Union
         raise
 
 def copy_from_container(container, source_path: Union[str, Path], dest_path: Union[str, Path]) -> None:
+    # get_archive 导出 tar，函数再写回宿主机；用于保存自修改日志与增量补丁。
     """
     Copy a file or directory from a Docker container to the local system.
     
@@ -257,6 +264,7 @@ def copy_from_container(container, source_path: Union[str, Path], dest_path: Uni
         raise
 
 def log_container_output(exec_result):
+    # 同时记录输出和检查退出码；非零退出码会抛异常，不只是打印警告。
     """
     Log output from a Docker container execution, handling both streaming and non-streaming cases.
     """

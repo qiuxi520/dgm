@@ -1,4 +1,5 @@
 import os
+# 中文导读：Git 补丁是 DGM 的版本载体；外层节点 ID 与实际 Git 提交哈希是两套标识。
 import git
 import subprocess
 
@@ -34,6 +35,8 @@ def apply_patch(git_dname, patch_str):
         print("apply_patch successful")
 
 def diff_versus_commit(git_dname, commit):
+    # 已跟踪文件用 git diff <基线提交>；未跟踪新文件与空文件比较生成新增文件 diff。
+    # 这保证新增工具也能遗传给子代，同时避免为了导出 diff 而修改 Git 暂存区。
     """
     Take a diff of `git_dname` current contents versus the `commit`, including untracked files,
     without modifying the repository state.
@@ -69,6 +72,7 @@ def diff_versus_commit(git_dname, commit):
     return diff_output
 
 def reset_to_commit(git_dname, commit):
+    # 恢复独立工作区的基线，并清除未跟踪文件；会丢弃该工作区尚未保存的修改。
     """
     Reset the repository at `git_dname` to the given `commit`.
     """
@@ -100,6 +104,7 @@ def reset_to_commit(git_dname, commit):
 
 
 def filter_patch_by_files(patch_str, target_files):
+    # 按 diff --git 文件块筛选，只保留目标文件对应的改动；不是按函数或代码行筛选。
     """
     Filters out the diff blocks related to any of the target_files in a patch string.
 
@@ -124,6 +129,7 @@ def filter_patch_by_files(patch_str, target_files):
 
 
 def remove_patch_by_files(patch_str, keyword='polyglot'):
+    # 排除文件头包含关键字的补丁块；Polyglot harness 会用它清理代理补丁。
     """
     Removes diff blocks related to files containing the keyword from a patch string.
 

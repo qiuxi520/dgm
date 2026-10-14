@@ -1,4 +1,5 @@
 import argparse
+# 中文导读：SWE 验收阶段，将逐题预测转换为官方格式，再调用固定版本的 SWE-bench 评估器。
 from concurrent.futures import ThreadPoolExecutor
 import json
 import os
@@ -35,6 +36,8 @@ def load_predictions(paths):
     return predictions
 
 def remove_patches_to_tests(model_patch):
+    # 去掉解题补丁中的测试文件修改，避免代理修改测试后影响官方私有测试验收。
+    # 这是按文件名模式过滤的规则，不是对任意测试变更的语义识别。
     """
     Remove any changes to the tests directory from the provided patch.
     This is to ensure that the model_patch does not disturb the repo's
@@ -65,6 +68,7 @@ def remove_patches_to_tests(model_patch):
     return "".join(filtered_lines)
 
 def preds_to_jsonl(dname, predictions):
+    # 每行仅保留 instance_id、版本名和过滤后的解题补丁，符合官方评估输入格式。
     dname = Path(dname)
 
     predictions_jsonl = str(dname / "all_preds.jsonl")
@@ -81,6 +85,8 @@ def preds_to_jsonl(dname, predictions):
     return predictions_jsonl
 
 def run_evals(predictions_jsonl, run_id, dataset_name, root_dir, output_dir, num_eval_procs=5):
+    # 官方评估器负责应用补丁并运行测试；切换目录用于把报告保存到指定节点目录。
+    # 注意 os.chdir 修改进程全局目录，在线程并发时不是线程局部状态。
     os.chdir(output_dir)  # switch dir so that things will be saved in the specified output_dir
     run_evals_cmd = f"""
 python {os.path.join(root_dir, './swe_bench/SWE-bench/swebench/harness/run_evaluation.py')}

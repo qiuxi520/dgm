@@ -1,7 +1,11 @@
 from pathlib import Path
+# 中文导读：编辑工具负责把模型提出的修改真正写入文件，支持 view/create/edit。
+# 当前 edit 覆盖整个文件，不是行范围编辑；模型需传入完整新内容以避免丢失其余代码。
 import subprocess
 
 def tool_info():
+    # name='editor' 是模型看到的工具名，与文件名 edit.py 不同。
+    # file_text 只在 create/edit 时需要；schema 和运行时校验共同约束调用。
     return {
         "name": "editor",
         "description": """Custom editing tool for viewing, creating, and editing files\n
@@ -33,12 +37,14 @@ def tool_info():
     }
 
 def maybe_truncate(content: str, max_length: int = 10000) -> str:
+    # 裁剪工具返回的显示文本以节省上下文，不会截断磁盘上的源文件内容。
     """Truncate long content and add marker."""
     if len(content) > max_length:
         return content[:max_length] + "\n<response clipped>"
     return content
 
 def validate_path(path: str, command: str) -> Path:
+    # 根据动作检查绝对路径和存在性；这不是限定只能访问某个仓库的权限边界。
     """
     Validate the file path for each command:
       - 'view': path may be a file or directory; must exist.
@@ -120,6 +126,7 @@ def view_path(path_obj: Path) -> str:
     return format_output(content, str(path_obj))
 
 def tool_function(command: str, path: str, file_text: str = None) -> str:
+    # 返回字符串以便作为工具结果回传给模型；错误也转换成文本，供模型修正参数。
     """
     Main tool function that handles:
       - 'view'  : View the entire file or directory listing

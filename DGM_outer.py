@@ -1,3 +1,7 @@
+# 中文导读：DGM 的外层进化调度器（先读本文件，再读 self_improve_step.py）。
+# archive 保存可继续繁衍的代理版本 ID；每个版本用父节点 ID、增量 diff 和评估结果表示。
+# 一代的流程：选择父代与诊断入口 → 并行自修改 → 过滤无效候选 → 更新档案 → 保存状态。
+# “自进化”发生在代理的 Python 代码、提示词和工具上，本模块没有训练基础模型权重。
 import argparse
 import datetime
 import json
@@ -13,6 +17,8 @@ from utils.docker_utils import setup_logger
 from utils.evo_utils import load_dgm_metadata, is_compiled_self_improve
 
 def initialize_run(output_dir, prevrun_dir=None, polyglot=False):
+    # 新实验使用仓库中缓存的 initial 评估结果；续跑取最后一代档案，从下一代开始。
+    # initial 是版本 ID，即使使用 Polyglot，后续代码仍以 output_dir/initial 寻找元数据。
     # Initialize archive
     start_gen_num = 0
     if not prevrun_dir:
@@ -35,6 +41,8 @@ def initialize_run(output_dir, prevrun_dir=None, polyglot=False):
     return archive, start_gen_num
 
 def any_exceeding_context_length(output_dir, commit_id, instance_ids):
+    # 这里根据历史日志中的特定报错判断上下文溢出，而不是计算 token 数。
+    # 连续出现两次报错被视为父代未妥善处理该问题；filter=False 保留原始错误行。
     """
     Check if any of the issues have exceeded the context length.
     """
@@ -48,6 +56,8 @@ def any_exceeding_context_length(output_dir, commit_id, instance_ids):
     return False
 
 def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', run_baseline=None, polyglot=False):
+    # 返回 [(父版本 ID, 改进入口), ...]；入口可为失败题目 ID，也可为通用缺陷标签。
+    # 一道失败题只提供诊断线索，诊断提示要求提出适用于多个仓库的代理能力改进。
     """
     Choose self-improve attempts for the current generation.
     """
@@ -55,6 +65,8 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
 
     # Get parent candidates
     candidates = {}
+    # 按档案顺序读取节点，并统计直接子代数；假设父节点已先进入 candidates。
+    # 不具备可读评估元数据的节点会被跳过，不能成为下一代父代。
     for commit in archive:
         try:
             metadata_path = os.path.join(output_dir, commit, "metadata.json")
@@ -77,10 +89,12 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
 
     # Choose parents based on method and baseline
     if run_baseline == 'no_darwin':
+        # 消融实验：只延续最后一个候选，不从历史分支中搜索；此分支只取一个父代。
         # Always take the last commit
         commits = list(candidates.keys())
         parent_commits = commits[-1:]
     elif method == 'score_prop':
+        # 将解题率经 sigmoid 映射到正权重，再归一化抽样；并非按原始分数直接抽样。
         # Choose parents based on score
         commits = list(candidates.keys())
         scores = [candidates[commit]['accuracy_score'] for commit in commits]
@@ -89,6 +103,9 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
         print(commits)
         parent_commits = random.choices(commits, probabilities, k=selfimprove_size)
     elif method == 'score_child_prop':
+        # 默认策略：w = sigmoid(10 * (解题率 - 0.5)) / (1 + 直接子代数)。
+        # 高分节点更易入选，繁衍较少的节点也有机会；random.choices 是有放回抽样，
+        # 因而同一个父代可以在一代内产生多个独立的改进尝试。
         # Choose parents based on score and the number of children
         commits = list(candidates.keys())
         scores = [candidates[commit]['accuracy_score'] for commit in commits]
@@ -99,6 +116,8 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
         probabilities = [prob / sum(probabilities) for prob in probabilities]
         parent_commits = random.choices(commits, probabilities, k=selfimprove_size)
     elif method == 'best':
+        # 阅读注意：实际 sorted 未设置 reverse=True，当前代码取的是最低分节点。
+        # 这是原实现与“best”命名的不一致；中文注释仅记录现状，不改动算法。
         # Choose parents with the best score
         sorted_commits = sorted(candidates, key=lambda x: candidates[x]['accuracy_score'])
         parent_commits = sorted_commits[:min(selfimprove_size, len(sorted_commits))]
@@ -115,11 +134,14 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
         unresolved_ids = candidates[parent_commit]['total_unresolved_ids']
         
         if polyglot:
+            # Polyglot 优先诊断空补丁和失败题；没有这些题时才回退到全部题目。
             entry_ids = empty_ids + unresolved_ids
             if not entry_ids:
                 entry_ids = resolved_ids + empty_ids + unresolved_ids
         else:
             num_total_ids = len(empty_ids) + len(resolved_ids) + len(unresolved_ids)
+            # SWE 分支依次尝试空补丁、随机性、上下文溢出三个通用改进方向。
+            # 各次随机判断有先后依赖，并不是三个互斥方向各占固定的 25% 概率。
 
             # Solve empty patches
             if len(empty_ids) >= 0.1 * num_total_ids and random.random() < 0.25:
@@ -142,6 +164,8 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
 
             # Choose a random unresolved entry
             if unresolved_ids == 0:
+                # 注意 unresolved_ids 来自列表字段，列表与整数 0 的比较不能判断空列表；
+                # 若列表为空，后面的 random.choice 会报错。此处保留原行为供学习对照。
                 continue
             entry_ids = unresolved_ids
         entry = random.choice(entry_ids)
@@ -150,6 +174,8 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
     return selfimprove_entries
 
 def filter_compiled(run_ids, output_dir, num_swe_issues=[], logger=None):
+    # “compiled”是评估结果完整性检查：有分数字段、有非空解题补丁、提交数够用。
+    # 它既不直接调用 Python 编译器，也不要求子代分数高于父代。
     """
     Filter out runs that did not compile or have all empty patches.
     """
@@ -172,6 +198,8 @@ def get_original_score(output_dir):
     return metadata["overall_performance"]["accuracy_score"]
 
 def update_archive(output_dir, archive, new_ids, method='keep_all', noise_leeway=0.1):
+    # 默认保留所有通过有效性检查的子代，包括暂时退步的分支，支持后续继续探索。
+    # keep_better 比较的是“初始代理分数 - 容差”，不是该子代自己的父代分数。
     """
     Update the archive with the new self-improve runs.
     """
@@ -190,6 +218,9 @@ def update_archive(output_dir, archive, new_ids, method='keep_all', noise_leeway
     return archive
 
 def get_full_eval_threshold(output_dir, archive):
+    # 在近乎完成 small+medium+big 的历史节点中，取第二高分并设 0.4 下限。
+    # 阅读注意：调用方把这个阈值传给 self_improve，但目前内层未使用该参数，
+    # 所以计算阈值并不意味着代码已经触发 big 子集的完整评估。
     """
     Get the threshold for full evaluation.
     """
@@ -219,6 +250,7 @@ def get_full_eval_threshold(output_dir, archive):
     return threshold
 
 def main():
+    # 本入口负责多代调度；单次自修改的容器生命周期和评估交给 self_improve。
     parser = argparse.ArgumentParser(description="Darwin Godel Machine!")
     parser.add_argument("--max_generation", type=int, default=80, help="Maximum number of evolution iterations.")
     parser.add_argument("--selfimprove_size", type=int, default=2, help="Number of self-improvements attempts per DGM generation.")
@@ -226,6 +258,8 @@ def main():
     parser.add_argument(
         "--choose_selfimproves_method", type=str, default='score_child_prop',
         choices=['random', 'score_prop', 'score_child_prop' 'best'],
+        # 注意：上面相邻字符串缺少逗号，会被 Python 拼接为 score_child_propbest。
+        # 默认值仍是 score_child_prop，但显式传入同名参数会被 argparse 拒绝。
         help="Method to choose self-improve attempts.",
     )
     parser.add_argument("--continue_from", type=str, default=None, help="Directory to continue the run from.")
@@ -268,6 +302,7 @@ def main():
     test_more_threshold = 0.4
     # Run the DGM
     for gen_num in range(start_gen_num, args.max_generation):
+        # 代数从 0 开始；本代所有父代均从更新前的同一份历史档案中选择。
         # Choose self-improve attempts
         selfimprove_entries = choose_selfimproves(
             output_dir, archive, args.selfimprove_size,
@@ -300,6 +335,8 @@ def main():
             ]
 
             for future in as_completed(futures):
+                # as_completed 先等待 future 完成，再调用 result；因此此处的 timeout
+                # 并不构成运行任务的 1.5 小时硬期限，容器内 timeout 才实际约束执行时间。
                 try:
                     # Added timeout to avoid hanging indefinitely (1.5 h here)
                     metadata = future.result(timeout=1.5*60*60)
@@ -323,6 +360,9 @@ def main():
 
         # Save DGM state
         with open(os.path.join(output_dir, "dgm_metadata.jsonl"), "a") as f:
+            # 每代追加档案快照、尝试入口及子代列表，供恢复运行和进化树可视化使用。
+            # indent=2 使单条记录跨多行；load_dgm_metadata 按记录边界读取，
+            # 不能简单地把这里当作“每行一个 JSON 对象”的标准 JSONL 来解析。
             f.write(json.dumps({
                 "generation": gen_num,
                 "selfimprove_entries": selfimprove_entries,

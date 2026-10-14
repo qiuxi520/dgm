@@ -1,3 +1,7 @@
+# 中文导读：代理的“观察 → 工具行动 → 获取结果 → 再决策”循环。
+# 模型给出结构化工具请求，Python 调用真实函数并回传结果；模型文本不会自动变成文件修改。
+# Claude 使用 tool_use/tool_result；o3 使用 function_call/function_call_output；
+# 其他模型走文本标签解析。支持的工具通过 tools.load_all_tools 动态发现。
 import ast
 import json
 import re
@@ -14,6 +18,8 @@ CLAUDE_MODEL = 'bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0'
 OPENAI_MODEL = 'o3-mini-2025-01-31'
 
 def process_tool_call(tools_dict, tool_name, tool_input):
+    # 用模型返回的工具名查注册表，再以关键字参数执行对应函数。
+    # 将工具异常转为字符串反馈给模型，使其有机会调整下一步操作。
     try:
         if tool_name in tools_dict:
             return tools_dict[tool_name]['function'](**tool_input)
@@ -32,6 +38,9 @@ def get_response_withtools(
     client, model, messages, tools, tool_choice,
     logging=None, max_retry=3
 ):
+    # 同一套接口分派到 Claude Messages 或 o3 Responses。
+    # 递归重试处理本函数捕获的异常，装饰器对最终向外传播的指定 API 异常做指数退避。
+    # 上下文溢出分支目前只有 pass，并未裁剪历史；这也成为外层可选的进化方向。
     try:
         if 'claude' in model:
             response = client.messages.create(
@@ -65,6 +74,9 @@ def get_response_withtools(
         raise  # Re-raise the exception after logging
 
 def check_for_tool_use(response, model=''):
+    # 将供应商响应归一化为 tool_id/name/input，供后续执行与回传关联。
+    # 当前路径一次只取一个工具请求；o3 的 API 请求也禁用了并行工具调用。
+    # 注意 o3 分支没有稳妥处理空 output 或完全没有 function_call 的情况。
     """
     Checks if the response contains a tool call.
     """
@@ -108,6 +120,8 @@ def check_for_tool_use(response, model=''):
     return None
 
 def convert_tool_info(tool_info, model=None):
+    # 把统一的 Claude 风格 schema 转成供应商格式；o3 strict 模式要求所有字段 required。
+    # 原可选字段改为允许 null，以表达“显式缺省”；本函数会原地修改 input_schema。
     """
     Converts tool_info from Claude format to the given model's format.
     """
@@ -269,6 +283,7 @@ def convert_msg_history_openai(msg_history):
     return new_msg_history
 
 def convert_msg_history(msg_history, model=None):
+    # 为日志或跨模型复用整理内容块；主分派函数里 o3 的跨模型转换目前被注释掉。
     """
     Convert message history from the model-specific format to a generic format.
     """
@@ -280,6 +295,8 @@ def convert_msg_history(msg_history, model=None):
         return msg_history
 
 def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
+    # 无原生工具调用时，提示词展示工具源码，并要求模型输出 <tool_use> 标签。
+    # 标签通过 ast.literal_eval 解析为数据，再由注册表分派，避免直接 eval 模型输出。
     # Construct message
     if msg_history is None:
         msg_history = []
@@ -341,6 +358,10 @@ def chat_with_agent_claude(
         msg_history=None,
         logging=print,
     ):
+    # 核心循环：把 response.content 加为 assistant 消息，把实际执行结果加为
+    # user/tool_result 消息；tool_use_id 把执行结果关联到原工具调用。
+    # 每次请求带上全部历史；模型不再请求工具时，记录最终文本并结束。
+    # 当前 except Exception: pass 会吞掉失败并返回已有历史，调用方还需检查补丁/日志。
     # Construct message
     if msg_history is None:
         msg_history = []
@@ -430,6 +451,9 @@ def chat_with_agent_openai(
         msg_history=None,
         logging=print,
     ):
+    # o3 使用 Responses 消息格式：先记录 function_call，再记录带相同 call_id
+    # 的 function_call_output，回传执行结果以继续模型决策。
+    # 当前循环主要保存工具调用与结果，最终保存 response；不要把它视为完整的推理轨迹。
     # Construct message
     if msg_history is None:
         msg_history = []
@@ -518,6 +542,8 @@ def chat_with_agent(
     logging=print,
     convert=False,  # Convert the message history to a generic format, so that msg_history can be used across models
 ):
+    # 代理统一入口；根据模型名选择工具协议，最终返回对话历史，文件修改由工具完成。
+    # Claude/o3 子函数返回本轮新增历史，本函数再拼上传入的历史。
     if msg_history is None:
         msg_history = []
 

@@ -1,6 +1,8 @@
 
 
 def get_test_command(eval_script):
+    # 从 SWE 评估脚本倒数第二行提取测试命令，并去掉特定路径参数以生成通用测试提示。
+    # 这依赖脚本格式约定，不是任意 shell 脚本的通用解析器。
     test_hint = ''
     # test_command is the 2nd last line in eval_script
     lines = eval_script.strip().split('\n')
@@ -17,6 +19,8 @@ def get_test_command(eval_script):
     return f'cd /testbed/ && {test_command} <specific test files>', test_hint
 
 def get_test_description(eval_script='', swerepo=False, polyglot=False):
+    # 区分 SWE 仓库、多语言题和 DGM 自身。自修改时只建议测试 tools/utils，
+    # 提示禁止运行 forward，避免测试时再次触发模型调用和代理执行链。
     assert not (swerepo and polyglot), "swerepo and polyglot cannot both be True"
     if swerepo:  # SWE repo
         swe_prompt = '''The tests in the repository can be run with the bash command `{test_command}`. If no specific test files are provided, all tests will be run. The given command-line options must be used EXACTLY as specified. Do not use any other command-line options. {test_hint}'''

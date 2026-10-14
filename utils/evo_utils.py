@@ -1,3 +1,4 @@
+# 中文导读：进化档案的数据接口。节点 ID 追溯祖先，补丁链恢复代码，评测报告提供适应度。
 import json
 import os
 
@@ -5,6 +6,8 @@ from utils.common_utils import load_json_file, read_file
 
 
 def load_dgm_metadata(dgm_metadata_path, last_only=False):
+    # 外层写的是带缩进的多行 JSON 记录，所以按换行后的左花括号分割记录，
+    # 而不是逐行 json.loads；last_only=True 用于恢复最后一代档案。
     # Load all archives from given metadata file
     if not os.path.exists(dgm_metadata_path):
         raise FileNotFoundError(f"Metadata file not found at {dgm_metadata_path}")
@@ -26,6 +29,9 @@ def load_dgm_metadata(dgm_metadata_path, last_only=False):
     return dgm_metadata
 
 def get_model_patch_paths(root_dir, dgm_dir, parent_commit):
+    # 从父节点一路追溯到 initial；initial 的代码由基础镜像提供，不对应增量 diff。
+    # 追溯收集顺序为“父 → 祖父”，最后反转为“最早祖先 → 父”，保证补丁正确叠加。
+    # 缺失 diff 时只打印提示并继续；这里没有验证谱系循环或补丁链是否完整。
     prev_commit = parent_commit
     patch_files = []
     while prev_commit != 'initial':
@@ -41,6 +47,10 @@ def get_model_patch_paths(root_dir, dgm_dir, parent_commit):
     return patch_files[::-1]  # reverse the list to get the correct order
 
 def get_all_performance(run_keyword, results_dir='./swe_bench'):
+    # 返回 (逐报告性能列表, 总体性能字典)，无匹配文件则返回 (None, None)。
+    # 解题率 = 所有报告 resolved_instances 之和 / submitted_instances 之和，
+    # 不等于对各报告解题率取简单平均；重复运行的题目 ID 会重复出现在各分类列表中。
+    # 文件名按子串匹配 run_keyword，调用方通常使用唯一的节点时间戳来避免混入别的运行。
     """
     Retrieve performance results for all runs based on the provided keyword.
 
@@ -94,6 +104,10 @@ def get_all_performance(run_keyword, results_dir='./swe_bench'):
     return performance_results, overall_performance
 
 def is_compiled_self_improve(metadata, num_swe_issues=[], logger=None):
+    # 此函数是“可归档候选”的启发式检查，不是实际编译、也不是性能提升检验。
+    # resolved + unresolved > 0 只要求至少一题产生非空补丁，全部失败也可能通过。
+    # 实际仅使用 num_swe_issues[0] 的下限；不检查第二个子集，也不要求总数恰好相等。
+    # 调用时需传非空 num_swe_issues；失败分支还需要非 None 的 logger。
     """
     Checks if the run was properly compiled and 'self-improved' by verifying:
       1. The 'overall_performance' dict has the required keys:

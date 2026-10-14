@@ -1,4 +1,6 @@
 from prompts.self_improvement_prompt import find_selfimprove_eval_logs, get_current_code, process_selfimprove_eval_logs
+# 中文导读：可选事后诊断，要求模型比较改进前后的日志并给出影响、进步、回归和 -2~2 分。
+# 该分数只用于解释，不是外层父代选择所用的 accuracy_score。
 from utils.common_utils import read_file
 
 
@@ -98,6 +100,9 @@ def get_diagnose_improvement_prompt(
         entry_id, parent_commit, root_dir, model_patch_file, out_dir, run_id, dataset,
         patch_files=[],
     ):
+    # 阅读注意：find_selfimprove_eval_logs 当前返回四项，这里却按三项解包；
+    # process_selfimprove_eval_logs 也需要四个输入并返回四项，这里仍按旧接口使用。
+    # 因而可选事后诊断当前不能正常执行；此注释记录源码现状，不变更接口。
     md_logs, eval_logs, predicted_patches = find_selfimprove_eval_logs(entry_id, out_dir, commit_id=parent_commit)
     md_log, eval_log, predicted_patch = process_selfimprove_eval_logs(md_logs, eval_logs, predicted_patches)
     code_files = ['coding_agent.py', 'tools/']

@@ -1,4 +1,7 @@
 
+# 中文导读：初始 SWE 编程代理，也是 DGM 自修改时实际执行编辑的程序。
+# 解题时目标目录是 /testbed/，自修改时是 /dgm/；两者都通过同一套 LLM 工具循环编辑文件。
+# 当前初始代理的 forward 很简洁：构造任务 → 调用 chat_with_agent；评估由外部 harness 完成。
 import argparse
 import subprocess
 import logging
@@ -65,6 +68,7 @@ def safe_log(message, level=logging.INFO):
         print(f"Warning: No logger found for thread {threading.get_ident()}")
 
 class AgenticSystem:
+    # 保存任务、目标仓库、Git 基线和日志配置；基础模型权重不在该类中更新。
     def __init__(
             self,
             problem_statement,
@@ -82,6 +86,7 @@ class AgenticSystem:
         self.test_description = test_description
         self.self_improve = self_improve
         self.instance_id = instance_id if not self_improve else 'dgm'
+        # SWE 版本无论解题还是自修改都使用 CLAUDE_MODEL；与 Polyglot 的模型选择不同。
         self.code_model = CLAUDE_MODEL
 
         # Initialize logger and store it in thread-local storage
@@ -92,10 +97,12 @@ class AgenticSystem:
             f.write('')
 
     def get_current_edits(self):
+        # 同时包含已跟踪文件修改和新文件，返回相对 base_commit 的完整 diff 字符串。
         diff = str(diff_versus_commit(self.git_tempdir, self.base_commit))
         return diff
 
     def get_regression_tests(self):
+        # 辅助能力：让模型寻找应持续通过的回归测试；初始 forward 并未调用它。
         """
         Get the regression tests from the repository.
         """
@@ -122,6 +129,8 @@ At the end, please provide a summary that includes where the regression tests ar
         return regression_tests_summary
 
     def run_regression_tests(self, regression_tests_summary):
+        # 辅助能力：把当前修改和测试说明交给模型执行，再把对话整理成报告。
+        # 这是代理内部报告，不是 SWE-bench 官方评分；初始 forward 也未调用它。
         """
         Run the regression tests and get the test report.
         """
@@ -151,6 +160,8 @@ Your task is to run the regression tests in the {self.git_tempdir} directory to 
         return test_report
 
     def forward(self):
+        # 提示词给出目标目录、问题和测试说明；模型自主决定查看文件、编辑和运行命令。
+        # --self_improve 在这里没有引入另一套循环，关键差别来自调用方传入的目录和任务。
         """
         The forward function for the AgenticSystem.
         """
@@ -195,6 +206,8 @@ def main():
     agentic_system.forward()
 
     # Get code diff and save to model_patch.diff
+    # forward 本身不返回补丁；工具先在工作区产生修改，最后统一通过 Git 导出。
+    # model_patch.diff 的含义随目标变化：/testbed 的解题补丁，或 /dgm 的代理进化补丁。
     model_patch = diff_versus_commit(args.git_dir, args.base_commit)
     model_patch_outfile = os.path.join(args.outdir, 'model_patch.diff') if args.outdir else 'model_patch.diff'
     with open(model_patch_outfile, 'w') as f:
