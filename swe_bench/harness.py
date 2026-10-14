@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 import docker
 from datasets import load_dataset
+from llm import DEFAULT_MODEL, llm_environment
 
 from prompts.testrepo_prompt import get_test_description
 from swebench.harness.test_spec import make_test_spec
@@ -40,7 +41,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
 
     # Skip if output result already exists
     if out_fname.exists():
-        print(f"Skipping existing entry {instance_id}")
+        print(f"跳过已有任务 {instance_id}")
         return {"success": True, "instance_id": instance_id}
 
     try:
@@ -60,20 +61,20 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
 
         # Check that we are in dgm directory
         tmp_currdir = os.path.abspath(os.getcwd())
-        logger.info(f"Current directory: {tmp_currdir}")
+        logger.info(f"当前目录：{tmp_currdir}")
         # If not in dgm directory, try to change to it
         if not tmp_currdir.endswith('/dgm'):
             try:
                 os.chdir('dgm')
                 tmp_currdir = os.path.abspath(os.getcwd())
-                logger.info(f"Changed directory to: {tmp_currdir}")
+                logger.info(f"已切换目录至：{tmp_currdir}")
             except Exception as e:
                 pass
         # If still not in dgm directory, go up until we find it
         while not tmp_currdir.endswith('/dgm'):
             os.chdir('..')
             tmp_currdir = os.path.abspath(os.getcwd())
-            logger.info(f"Changed directory to: {tmp_currdir}")
+            logger.info(f"已切换目录至：{tmp_currdir}")
 
         # Copy the necessary files and requirements to the container
         copy_to_container(container, 'coding_agent.py', '/dgm/coding_agent.py')
@@ -88,7 +89,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         chat_history_file_container = f'/dgm/{chat_history_file.name}'
 
         # Install issue requirements
-        logger.info("Setting up environment")
+        logger.info("正在配置环境")
         eval_script = test_spec.eval_script
         eval_file.write_text(eval_script)
         copy_to_container(container, eval_file, '/eval.sh')
@@ -103,7 +104,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         # Apply model patch
         # 这些补丁修改 /dgm 的代理本身，而不是当前 SWE 题目的 /testbed 仓库。
         if model_patch_paths:
-            safe_log("Applying model patches")
+            safe_log("正在应用模型补丁")
             for model_patch_path in model_patch_paths:
                 copy_to_container(container, model_patch_path, '/dgm/parent_patch.txt')
                 exec_result = container.exec_run("/bin/sh -c 'patch -p1 < /dgm/parent_patch.txt'", workdir='/dgm')
@@ -112,20 +113,13 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
                 log_container_output(exec_result)
 
         # Install this repo requirements
-        safe_log("Installing more requirements")
+        safe_log("正在安装额外依赖")
         exec_result = container.exec_run("python -m pip install -r /dgm/requirements.txt", workdir='/')
         log_container_output(exec_result)
 
         # Run the agent
-        env_vars = {
-            "ANTHROPIC_API_KEY": os.getenv('ANTHROPIC_API_KEY'),
-            "AWS_REGION": os.getenv('AWS_REGION'),
-            "AWS_REGION_NAME": os.getenv('AWS_REGION_NAME'),
-            "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
-            "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
-            "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
-        }
-        safe_log("Running the agent")
+        env_vars = llm_environment()
+        safe_log("正在运行智能体")
         cmd = [
             "timeout", "32400",  # 9h timeout
             "python", "/dgm/coding_agent.py",
@@ -141,7 +135,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         log_container_output(exec_result)
 
         # Copy output files back to host
-        logger.info("Copying output files back to host")
+        logger.info("正在将输出文件复制回宿主机")
         copy_from_container(container, chat_history_file_container, chat_history_file)
         # Additional chat history files
         exec_result = container.exec_run(f"find /dgm/ -name '{instance_id}_*.md'", workdir='/')
@@ -151,7 +145,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
             copy_from_container(container, chat_history_file_container, chat_history_file)
 
         # Get model_patch
-        logger.info("Getting model_patch")
+        logger.info("正在获取模型补丁")
         exec_result = container.exec_run("cat /dgm/model_patch.diff")
         log_container_output(exec_result)
         model_patch = exec_result.output.decode()
@@ -177,7 +171,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         return {"success": True, "instance_id": instance_id}
 
     except Exception as e:
-        print(f"Error processing entry {instance_id}: {str(e)}")
+        print(f"处理任务失败 {instance_id}: {str(e)}")
         return {"success": False, "instance_id": instance_id, "error": str(e)}
 
     finally:
@@ -185,7 +179,7 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         try:
             cleanup_container(client, container, logger)
         except Exception as e:
-            print(f"Error cleaning up Docker container for {instance_id}: {e}")
+            print(f"清理任务 Docker 容器失败 {instance_id}: {e}")
 
 def harness(
         test_task_list=None,
@@ -217,7 +211,7 @@ def harness(
     # Ensure that necessary directories exist
     if model_name_or_path is None:
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        model_name_or_path = f"{timestamp}--claude-3-5-sonnet-20241022"
+        model_name_or_path = f"{timestamp}--{DEFAULT_MODEL}"
     pred_dname = Path(pred_dname)
     pred_dname.mkdir(exist_ok=True)
     out_dnames = []
@@ -239,7 +233,7 @@ def harness(
         out_dname = pred_dname / model_name_or_path_inst
         out_dname.mkdir(exist_ok=True)
         
-        print(f"Starting evaluation {eval_idx} for model {model_name_or_path}")
+        print(f"开始模型 {model_name_or_path} 的第 {eval_idx} 次评估")
         
         # Process entries in parallel
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -253,16 +247,16 @@ def harness(
             for future in as_completed(future_to_entry):
                 result = future.result()
                 if result["success"]:
-                    print(f"Successfully processed entry {result['instance_id']} for eval {eval_idx}")
+                    print(f"第 {eval_idx} 次评估成功处理任务 {result['instance_id']}")
                 else:
-                    print(f"Failed to process entry {result['instance_id']} for eval {eval_idx}: {result.get('error', 'Unknown error')}")
+                    print(f"第 {eval_idx} 次评估处理任务 {result['instance_id']} 失败：{result.get('error', '未知错误')}")
         return out_dname
 
     # Process all evaluations in parallel
     with ThreadPoolExecutor(max_workers=num_evals_parallel) as eval_executor:
         out_dnames = list(eval_executor.map(process_evaluation, range(num_evals)))
 
-    print(f"All evaluations completed for model {model_name_or_path}")
+    print(f"模型的全部评估已完成：{model_name_or_path}")
     return out_dnames
 
 def main():

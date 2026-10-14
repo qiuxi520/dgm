@@ -155,7 +155,7 @@ def replace_uninstallable_packages_requirements_txt(requirement_str: str) -> str
     requirements_replaced = []
     for requirement in requirements:
         if requirement in replacements:
-            print(f"Replaced {requirement!r} with {replacements[requirement]!r} (replace_uninstallable_packages)")
+            print(f"已将 {requirement!r} 替换为 {replacements[requirement]!r}（替换无法安装的软件包）")
             requirements_replaced.append(replacements[requirement])
         else:
             requirements_replaced.append(requirement)

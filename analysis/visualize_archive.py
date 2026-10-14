@@ -312,13 +312,13 @@ def create_plotly_figure(graph, pos, html_path, colorbar_title="Score"):
     )
 
     fig.write_html(html_path)
-    print(f"Saved interactive visualization to {html_path}")
+    print(f"交互式可视化已保存至 {html_path}")
     svg_path = html_path.replace('.html', '.svg')
     if 'halluc' in colorbar_title.lower():
         fig.write_image(svg_path, width=2200, height=800)
     else:
         fig.write_image(svg_path, width=1100, height=800)
-    print(f"Saved static visualization to {svg_path}")
+    print(f"静态可视化已保存至 {svg_path}")
 
 
 def visualize_experiment_run(dgm_dir, archives, metadata_name="metadata.json"):
@@ -400,20 +400,20 @@ def analyse_experiment_run(dgm_dir, archives, metadata_name="metadata.json"):
         avg_score = None
 
     # Prepare the analysis string
-    analysis_str = "=== Experiment Run Analysis (Accuracy Score) ===\n"
-    analysis_str += f"Number of compiled runs: {num_compiled}\n"
+    analysis_str = "=== 实验运行分析（准确率） ===\n"
+    analysis_str += f"通过编译的运行数： {num_compiled}\n"
     if num_compiled > 0:
-        analysis_str += f"Highest score: {best_score}\n"
-        analysis_str += f"Lowest score:  {worst_score}\n"
-        analysis_str += f"Average score: {round(avg_score, 2)}\n"
+        analysis_str += f"最高分： {best_score}\n"
+        analysis_str += f"最低分：  {worst_score}\n"
+        analysis_str += f"平均分： {round(avg_score, 2)}\n"
 
-    analysis_str += "\nCommands to eval highest scoring runs on SWE-Bench:\n"
+    analysis_str += "\n在 SWE-bench 上评估最高分运行的命令：\n"
     if num_compiled > 0:
         highest_scored = [node_id for node_id, score in compiled_runs if score == best_score]
         for node_id in highest_scored:
             analysis_str += f"{node_id}: {get_evalswe_command(dgm_dir, node_id)}"
 
-    analysis_str += "\nCompiled runs sorted by score (descending):\n"
+    analysis_str += "\n按分数降序排列的已编译运行：\n"
     for node_id, score in compiled_runs:
         analysis_str += f"  {node_id}: {score}\n"
     analysis_str += "================================\n"
@@ -430,7 +430,7 @@ def analyse_experiment_run(dgm_dir, archives, metadata_name="metadata.json"):
 
     # Print the analysis string
     print(analysis_str)
-    print(f"Analysis saved to {analysis_path}")
+    print(f"分析结果已保存至 {analysis_path}")
 
 
 def analyse_experiment_run_halluc(dgm_dir, archives, metadata_name="metadata.json"):
@@ -467,20 +467,20 @@ def analyse_experiment_run_halluc(dgm_dir, archives, metadata_name="metadata.jso
         avg_score = None
 
     # Prepare the analysis string
-    analysis_str = "=== Experiment Run Analysis (Hallucination Score + Tool Util) ===\n"
-    analysis_str += f"Number of compiled runs: {num_compiled}\n"
+    analysis_str = "=== 实验运行分析（幻觉评分与工具利用率） ===\n"
+    analysis_str += f"通过编译的运行数： {num_compiled}\n"
     if num_compiled > 0:
-        analysis_str += f"Highest final halluc score: {best_score}\n"
-        analysis_str += f"Lowest final halluc score:  {worst_score}\n"
-        analysis_str += f"Average final halluc score: {round(avg_score, 2)}\n"
+        analysis_str += f"最高最终幻觉评分： {best_score}\n"
+        analysis_str += f"最低最终幻觉评分：  {worst_score}\n"
+        analysis_str += f"平均最终幻觉评分： {round(avg_score, 2)}\n"
 
-    analysis_str += "\nCommands to eval highest scoring runs on SWE-Bench:\n"
+    analysis_str += "\n在 SWE-bench 上评估最高分运行的命令：\n"
     if num_compiled > 0:
         highest_scored = [node_id for node_id, score in compiled_runs if score >= 1.5]
         for node_id in highest_scored:
             analysis_str += f"{node_id}: {get_evalswe_command(dgm_dir, node_id)}"
 
-    analysis_str += "\nCompiled runs sorted by final halluc score (descending):\n"
+    analysis_str += "\n按最终幻觉评分降序排列的已编译运行：\n"
     for node_id, score in compiled_runs:
         analysis_str += f"  {node_id}: {score}\n"
     analysis_str += "================================\n"
@@ -497,7 +497,7 @@ def analyse_experiment_run_halluc(dgm_dir, archives, metadata_name="metadata.jso
 
     # Print the analysis string
     print(analysis_str)
-    print(f"Analysis saved to {analysis_path}")
+    print(f"分析结果已保存至 {analysis_path}")
 
 
 def main():

@@ -123,7 +123,7 @@ def generate_dataset_metadata(benchmark_dir, all_commits):
                     task_metadata = extract_task_metadata(lang_dir, all_commits)
                     return task_metadata
                 except Exception as e:
-                    print(f"Error processing {lang_dir}: {e}")
+                    print(f"处理 {lang_dir} 失败：{e}")
                     return None
 
         # Map the processing function across all task directories
@@ -143,9 +143,9 @@ def register_git(benchmark_path):
     ]
 
     if practice_dirs:
-        print(f"Initializing git repositories for {len(practice_dirs)} practice directories...")
+        print(f"正在为 {len(practice_dirs)} 个练习目录初始化 Git 仓库……")
     else:
-        print("All practice directories already initialized with git")
+        print("所有练习目录均已初始化 Git 仓库")
         commits_path = benchmark_path / "polyglot_benchmark_commits.json"
         if os.path.exists(commits_path):
             with open(commits_path) as f:
@@ -210,7 +210,7 @@ def register_git(benchmark_path):
                 return {instance_id: (solution_commit, all_files_commit)}
 
             except subprocess.CalledProcessError as e:
-                print(f"Error initializing git in {practice_dir}: {e}")
+                print(f"在 {practice_dir} 初始化 Git 失败：{e}")
 
         # Map the git init function across all practice directories with progress bar
         # Combine all returned dicts into one big dict
@@ -222,7 +222,7 @@ def register_git(benchmark_path):
         commits_path = benchmark_path / "polyglot_benchmark_commits.json"
         with open(commits_path, "w") as f:
             json.dump(all_commits, f, indent=2)
-        print(f"Saved commit hashes to {commits_path}")
+        print(f"提交哈希已保存至 {commits_path}")
         
     return all_commits
         
@@ -233,13 +233,13 @@ def main():
     # Check if polyglot-benchmark exists, if not clone it
     benchmark_path = Path(benchmark_dir) / "polyglot-benchmark"
     if not benchmark_path.exists():
-        print("Cloning polyglot-benchmark repository to", str(benchmark_path), "...")
+        print("正在克隆 polyglot-benchmark 仓库至", str(benchmark_path), "...")
         subprocess.run(
             ["git", "clone", "https://github.com/Aider-AI/polyglot-benchmark.git", str(benchmark_path)],
             check=True
         )
     else:
-        print(f"Found polyglot-benchmark at {benchmark_path}")
+        print(f"已找到 polyglot-benchmark：{benchmark_path}")
     
     all_commits = register_git(benchmark_path)
     
@@ -250,8 +250,8 @@ def main():
     with open(output_path, "w") as f:
         json.dump(metadata, f, indent=2)
     
-    print(f"Generated metadata for {len(metadata)} tasks")
-    print(f"Metadata written to {output_path}")
+    print(f"已生成 {len(metadata)} 个任务的元数据")
+    print(f"元数据已写入 {output_path}")
 
 if __name__ == "__main__":
     main()

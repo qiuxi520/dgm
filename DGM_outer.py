@@ -49,9 +49,13 @@ def any_exceeding_context_length(output_dir, commit_id, instance_ids):
     for instance_id in instance_ids:
         md_logs, _, _, _ = find_selfimprove_eval_logs(instance_id, output_dir, commit_id, filter=False)
         md_log = md_logs[0]
-        error_str = "Error in get_response_withtools: Error code: 400 - {'message': 'Input is too long for requested model.'}"
-        # Repeated error_str means no attempt to fix it
-        if f'{error_str}\n{error_str}' in md_log:
+        # 兼容历史英文日志与当前中文日志，保留供应商返回的原始错误内容。
+        error_detail = "Error code: 400 - {'message': 'Input is too long for requested model.'}"
+        error_strings = [
+            f"{prefix}{error_detail}"
+            for prefix in ("Error in get_response_withtools: ", "工具调用模型请求失败：")
+        ]
+        if any(f'{error_str}\n{error_str}' in md_log for error_str in error_strings):
             return True
     return False
 
@@ -84,7 +88,7 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
                 candidates[parent_commit]['children_count'] += 1
         except Exception as e:
             # probably because swe-eval failed, generated code did not compile, etc.
-            print(f"{commit} not eligible for being a parent: {e}")
+            print(f"{commit} 不满足父代条件：{e}")
             continue
 
     # Choose parents based on method and baseline
@@ -181,11 +185,11 @@ def filter_compiled(run_ids, output_dir, num_swe_issues=[], logger=None):
     """
     run_ids_compiled = []
 
-    logger.info(f"num_swe_issues: {num_swe_issues}")
+    logger.info(f"SWE 任务数量：{num_swe_issues}")
     for run_id in run_ids:
         metadata_path = os.path.join(output_dir, run_id, "metadata.json")
         metadata = load_json_file(metadata_path)
-        logger.info(f"{run_id} metadata: {metadata}")
+        logger.info(f"{run_id} 元数据：{metadata}")
         if is_compiled_self_improve(metadata, num_swe_issues=num_swe_issues, logger=logger):
             run_ids_compiled.append(run_id)
     return run_ids_compiled
@@ -297,8 +301,8 @@ def main():
 
     # Set up logger
     logger = setup_logger(os.path.join(output_dir, "dgm_outer.log"))
-    logger.info(f"Starting DGM run {run_id} with arguments: {vars(args)}")
-    logger.info(f"Archive: {archive}")
+    logger.info(f"开始 DGM 实验 {run_id}，参数：{vars(args)}")
+    logger.info(f"档案：{archive}")
     test_more_threshold = 0.4
     # Run the DGM
     for gen_num in range(start_gen_num, args.max_generation):
@@ -310,7 +314,7 @@ def main():
             run_baseline=args.run_baseline,
             polyglot=args.polyglot,
         )
-        logger.info(f"Self-improve entries for generation {gen_num}: {selfimprove_entries}")
+        logger.info(f"第 {gen_num} 代的自改进任务：{selfimprove_entries}")
 
         # Run self-improvement processes
         selfimprove_ids = []
@@ -342,15 +346,15 @@ def main():
                     metadata = future.result(timeout=1.5*60*60)
                     selfimprove_ids.append(metadata['run_id'])
                 except TimeoutError:
-                    logger.error("Self-improvement attempt timed out.")
+                    logger.error("自改进尝试超时。")
                     future.cancel()  # Optionally cancel the future if it's still running
                 except Exception as e:
                     import traceback
-                    logger.error(f"Self-improvement step failed: {e}")
-                    logger.error(f"Traceback:\n{traceback.format_exc()}")
+                    logger.error(f"自改进步骤失败：{e}")
+                    logger.error(f"异常堆栈：\n{traceback.format_exc()}")
 
         # Update archive
-        logger.info(f"Updating archive for generation {gen_num}")
+        logger.info(f"正在更新档案，代数：{gen_num}")
         selfimprove_ids_compiled = filter_compiled(
             selfimprove_ids,
             output_dir,

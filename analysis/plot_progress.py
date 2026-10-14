@@ -52,8 +52,8 @@ def main():
             else:
                 avg_scores.append(avg_scores[-1])
     # Print the results
-    print("Total iterations:", len(iterations))
-    print("Best scores:", best_scores)
+    print("总迭代次数：", len(iterations))
+    print("最佳分数：", best_scores)
 
     # Get progress on best node id
     best_node_progress_ids = []
@@ -65,8 +65,8 @@ def main():
     best_node_progress_ids.reverse()
     best_node_progress_its = [it for it, node_id in it_nodeid_dict.items() if node_id in best_node_progress_ids]
     best_node_progress_scores = [get_performance_score(dgm_dir, node_id) for node_id in best_node_progress_ids]
-    print("\nBest node progress iterations:", best_node_progress_its)
-    print("Best node progress ids:", best_node_progress_ids)
+    print("\n最佳节点的进步迭代：", best_node_progress_its)
+    print("最佳节点的进步 ID：", best_node_progress_ids)
 
     # Colors
     color_schemes = {
@@ -94,7 +94,7 @@ def main():
     # Save as SVG with transparent background
     plt.savefig(os.path.join(dgm_dir, "dgm_progress.svg"), transparent=True)
     plt.close()
-    print(f"\nProgress plot saved at:")
+    print(f"\n进度图已保存至:")
     print(f"- {os.path.join(dgm_dir, 'dgm_progress.png')}")
     print(f"- {os.path.join(dgm_dir, 'dgm_progress.svg')}")
 

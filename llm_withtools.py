@@ -1,7 +1,7 @@
 # 中文导读：代理的“观察 → 工具行动 → 获取结果 → 再决策”循环。
 # 模型给出结构化工具请求，Python 调用真实函数并回传结果；模型文本不会自动变成文件修改。
-# Claude 使用 tool_use/tool_result；o3 使用 function_call/function_call_output；
-# 其他模型走文本标签解析。支持的工具通过 tools.load_all_tools 动态发现。
+# DeepSeek 使用 Chat Completions 原生函数调用；Claude 使用 tool_use/tool_result；
+# o3 使用 Responses，其余模型走文本标签解析。工具通过 tools.load_all_tools 动态发现。
 import ast
 import json
 import re
@@ -10,12 +10,13 @@ import backoff
 import openai
 import copy
 
-from llm import create_client, get_response_from_llm
+from llm import DEFAULT_MODEL, create_client, deepseek_request_options, get_response_from_llm
 from prompts.tooluse_prompt import get_tooluse_prompt
 from tools import load_all_tools
 
-CLAUDE_MODEL = 'bedrock/us.anthropic.claude-3-5-sonnet-20241022-v2:0'
-OPENAI_MODEL = 'o3-mini-2025-01-31'
+# 保留旧常量名供历史代理补丁使用，两个编程入口统一使用配置中的模型。
+CLAUDE_MODEL = DEFAULT_MODEL
+OPENAI_MODEL = DEFAULT_MODEL
 
 def process_tool_call(tools_dict, tool_name, tool_input):
     # 用模型返回的工具名查注册表，再以关键字参数执行对应函数。
@@ -38,11 +39,18 @@ def get_response_withtools(
     client, model, messages, tools, tool_choice,
     logging=None, max_retry=3
 ):
-    # 同一套接口分派到 Claude Messages 或 o3 Responses。
+    # 分派到 DeepSeek Chat Completions、Claude Messages 或 o3 Responses。
     # 递归重试处理本函数捕获的异常，装饰器对最终向外传播的指定 API 异常做指数退避。
     # 上下文溢出分支目前只有 pass，并未裁剪历史；这也成为外层可选的进化方向。
     try:
-        if 'claude' in model:
+        if model.startswith('deepseek-'):
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                tools=tools,
+                **deepseek_request_options(),
+            )
+        elif 'claude' in model:
             response = client.messages.create(
                 model=model,
                 messages=messages,
@@ -63,7 +71,7 @@ def get_response_withtools(
             raise ValueError(f"Unsupported model: {model}")
         return response
     except Exception as e:
-        logging(f"Error in get_response_withtools: {str(e)}")
+        logging(f"工具调用模型请求失败：{str(e)}")
         if max_retry > 0:
             return get_response_withtools(client, model, messages, tools, tool_choice, logging, max_retry - 1)
 
@@ -287,12 +295,76 @@ def convert_msg_history(msg_history, model=None):
     """
     Convert message history from the model-specific format to a generic format.
     """
-    if 'claude' in model:
+    if model and model.startswith('deepseek-'):
+        history = []
+        for message in msg_history:
+            role = message['role']
+            content = message.get('content') or ''
+            if role == 'tool':
+                role = 'user'
+                content = f'Tool Result: {content}'
+            elif message.get('tool_calls'):
+                content += '\n' + json.dumps(message['tool_calls'], ensure_ascii=False)
+            history.append({'role': role, 'content': [{'type': 'text', 'text': content}]})
+        return history
+    elif 'claude' in model:
         return convert_msg_history_claude(msg_history)
     elif model.startswith('o3-'):
         return convert_msg_history_openai(msg_history)
     else:
         return msg_history
+
+def chat_with_agent_deepseek(msg, model=DEFAULT_MODEL, msg_history=None, logging=print):
+    """原生函数调用循环，保留推理字段及所有工具调用的 ID。"""
+    client, client_model = create_client(model)
+    all_tools = load_all_tools(logging=logging)
+    tools_dict = {tool['info']['name']: tool for tool in all_tools}
+    tools = [
+        {
+            'type': 'function',
+            'function': {
+                'name': tool['info']['name'],
+                'description': tool['info']['description'],
+                'parameters': copy.deepcopy(tool['info']['input_schema']),
+            },
+        }
+        for tool in all_tools
+    ]
+    messages = copy.deepcopy(msg_history or [])
+    messages.append({'role': 'user', 'content': msg})
+    logging(f'用户指令：{msg}')
+    while True:
+        response = get_response_withtools(
+            client, client_model, messages, tools, 'auto', logging=logging,
+        )
+        choice = response.choices[0]
+        message = choice.message
+        if choice.finish_reason == 'length':
+            raise RuntimeError('DeepSeek 输出达到长度上限，请增大 DEEPSEEK_MAX_TOKENS。')
+        assistant = {'role': 'assistant', 'content': message.content}
+        reasoning = getattr(message, 'reasoning_content', None)
+        if reasoning is not None:
+            assistant['reasoning_content'] = reasoning
+        calls = message.tool_calls or []
+        if calls:
+            assistant['tool_calls'] = [call.model_dump(exclude_none=True) for call in calls]
+        messages.append(assistant)
+        logging(f'智能体响应：{message.content or ""}')
+        if not calls:
+            return messages
+        for call in calls:
+            try:
+                arguments = json.loads(call.function.arguments)
+                if not isinstance(arguments, dict):
+                    raise ValueError('工具参数必须为 JSON 对象')
+                result = process_tool_call(tools_dict, call.function.name, arguments)
+            except (ValueError, TypeError) as error:
+                result = f'工具参数解析失败：{error}'
+            logging(f'调用工具：{call.function.name}\n工具结果：{result}')
+            messages.append({
+                'role': 'tool', 'tool_call_id': call.id, 'content': str(result),
+            })
+
 
 def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
     # 无原生工具调用时，提示词展示工具源码，并要求模型输出 <tool_use> 标签。
@@ -312,7 +384,7 @@ def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
         client, client_model = create_client(model)
 
         # Call API
-        logging(f"Input: {msg}")
+        logging(f"输入：{msg}")
         response, new_msg_history = get_response_from_llm(
             msg=msg,
             client=client,
@@ -321,7 +393,7 @@ def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
             print_debug=False,
             msg_history=new_msg_history,
         )
-        logging(f"Output: {response}")
+        logging(f"输出：{response}")
 
         # Tool use
         tool_use = check_for_tool_use(response, model=client_model)
@@ -333,7 +405,8 @@ def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
 
             # Get tool response
             tool_msg = f'Tool Used: {tool_name}\nTool Input: {tool_input}\nTool Result: {tool_result}'
-            logging(tool_msg)
+            # 对话中的工具标记保持原格式，仅将展示用标签改为中文。
+            logging(f'调用工具：{tool_name}\n工具输入：{tool_input}\n工具结果：{tool_result}')
             response, new_msg_history = get_response_from_llm(
                 msg=tool_msg,
                 client=client,
@@ -342,7 +415,7 @@ def chat_with_agent_manualtools(msg, model, msg_history=None, logging=print):
                 print_debug=False,
                 msg_history=new_msg_history,
             )
-            logging(f"Output: {response}")
+            logging(f"输出：{response}")
 
             # Check for next tool use
             tool_use = check_for_tool_use(response, model=client_model)
@@ -469,7 +542,7 @@ def chat_with_agent_openai(
         }
     ]
     separator = '=' * 10
-    logging(f"\n{separator} User Instruction {separator}\n{msg}")
+    logging(f"\n{separator} 用户指令 {separator}\n{msg}")
     try:
         # Create client
         client, client_model = create_client(model)
@@ -488,7 +561,7 @@ def chat_with_agent_openai(
             tools=tools,
             logging=logging,
         )
-        logging(f"\n{separator} Agent Response {separator}\n{response}")
+        logging(f"\n{separator} 智能体响应 {separator}\n{response}")
 
         # Check for tool use
         tool_use = check_for_tool_use(response, model=client_model)
@@ -499,9 +572,9 @@ def chat_with_agent_openai(
             tool_input = tool_use['tool_input']
             tool_result = process_tool_call(tools_dict, tool_name, tool_input)
 
-            logging(f"Tool Used: {tool_name}")
-            logging(f"Tool Input: {tool_input}")
-            logging(f"Tool Result: {tool_result}")
+            logging(f"调用工具：{tool_name}")
+            logging(f"工具输入：{tool_input}")
+            logging(f"工具结果：{tool_result}")
 
             # Get tool response
             for tool_call in response.output:
@@ -525,7 +598,7 @@ def chat_with_agent_openai(
             # Check for next tool use
             tool_use = check_for_tool_use(response, model=client_model)
 
-            logging(f"Tool Response: {response}")
+            logging(f"工具响应：{response}")
 
         # Get final response
         new_msg_history.append(response)
@@ -547,7 +620,13 @@ def chat_with_agent(
     if msg_history is None:
         msg_history = []
 
-    if 'claude' in model:
+    if model.startswith('deepseek-'):
+        new_msg_history = chat_with_agent_deepseek(
+            msg, model=model, msg_history=msg_history, logging=logging,
+        )
+        if convert:
+            new_msg_history = convert_msg_history(new_msg_history, model=model)
+    elif 'claude' in model:
         # Claude models
         new_msg_history = chat_with_agent_claude(msg, model=model, msg_history=msg_history, logging=logging)
         conv_msg_history = convert_msg_history(new_msg_history, model=model)

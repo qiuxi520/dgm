@@ -96,13 +96,13 @@ def build_image(
     # Create a logger for the build process
     logger = setup_logger(image_name, build_dir / "build_image.log")
     logger.info(
-        f"Building image {image_name}\n"
-        f"Using dockerfile:\n{dockerfile}\n"
-        f"Adding ({len(setup_scripts)}) setup scripts to image build repo"
+        f"正在构建镜像 {image_name}\n"
+        f"使用 Dockerfile：\n{dockerfile}\n"
+        f"向镜像构建目录添加 {len(setup_scripts)} 个配置脚本"
     )
 
     for setup_script_name, setup_script in setup_scripts.items():
-        logger.info(f"[SETUP SCRIPT] {setup_script_name}:\n{setup_script}")
+        logger.info(f"[配置脚本] {setup_script_name}:\n{setup_script}")
     try:
         # Copy a local folder to build_dir so Docker can see it
         if repo:
@@ -110,7 +110,7 @@ def build_image(
             if local_folder.is_dir():
                 target_folder = build_dir / repo
                 shutil.copytree(local_folder, target_folder, dirs_exist_ok=True)
-                logger.info(f"Copied folder {local_folder} to {target_folder}")
+                logger.info(f"已将目录 {local_folder} 复制到 {target_folder}")
 
         # Write the setup scripts to the build directory
         for setup_script_name, setup_script in setup_scripts.items():
@@ -119,7 +119,7 @@ def build_image(
                 f.write(setup_script)
             if setup_script_name not in dockerfile:
                 logger.warning(
-                    f"Setup script {setup_script_name} may not be used in Dockerfile"
+                    f"配置脚本 {setup_script_name} 可能未在 Dockerfile 中使用"
                 )
 
         # Write the dockerfile to the build directory
@@ -129,7 +129,7 @@ def build_image(
 
         # Build the image
         logger.info(
-            f"Building docker image {image_name} in {build_dir} with platform {platform}"
+            f"正在 {build_dir} 中构建 Docker 镜像 {image_name}，平台：{platform}"
         )
         response = client.api.build(
             path=str(build_dir),
@@ -152,17 +152,17 @@ def build_image(
             elif "errorDetail" in chunk:
                 # Decode error message, raise BuildError
                 logger.error(
-                    f"Error: {ansi_escape.sub('', chunk['errorDetail']['message'])}"
+                    f"错误：{ansi_escape.sub('', chunk['errorDetail']['message'])}"
                 )
                 raise docker.errors.BuildError(
                     chunk["errorDetail"]["message"], buildlog
                 )
-        logger.info("Image built successfully!")
+        logger.info("镜像构建成功！")
     except docker.errors.BuildError as e:
-        logger.error(f"docker.errors.BuildError during {image_name}: {e}")
+        logger.error(f"构建镜像 {image_name} 时发生 docker.errors.BuildError：{e}")
         raise BuildImageError(image_name, str(e), logger) from e
     except Exception as e:
-        logger.error(f"Error building image {image_name}: {e}")
+        logger.error(f"构建镜像 {image_name} 失败：{e}")
         raise BuildImageError(image_name, str(e), logger) from e
     finally:
         close_logger(logger)  # functions that create loggers should close them
@@ -199,12 +199,12 @@ def build_base_images(
                 # Remove the base image if it exists and force rebuild is enabled
                 remove_image(client, image_name, "quiet")
             else:
-                print(f"Base image {image_name} already exists, skipping build.")
+                print(f"基础镜像 {image_name} 已存在，跳过构建。")
                 continue
         except docker.errors.ImageNotFound:
             pass
         # Build the base image (if it does not exist or force rebuild is enabled)
-        print(f"Building base image ({image_name})")
+        print(f"正在构建基础镜像（{image_name}）")
         build_image(
             image_name=image_name,
             setup_scripts={},
@@ -213,7 +213,7 @@ def build_base_images(
             client=client,
             build_dir=BASE_IMAGE_BUILD_DIR / image_name.replace(":", "__"),
         )
-    print("Base images built successfully.")
+    print("基础镜像构建成功。")
 
 
 def get_env_configs_to_build(
@@ -294,9 +294,9 @@ def build_env_images(
     build_base_images(client, dataset, force_rebuild)
     configs_to_build = get_env_configs_to_build(client, dataset)
     if len(configs_to_build) == 0:
-        print("No environment images need to be built.")
+        print("没有需要构建的环境镜像。")
         return [], []
-    print(f"Total environment images to build: {len(configs_to_build)}")
+    print(f"待构建的环境镜像总数：{len(configs_to_build)}")
 
     # Build the environment images
     successful, failed = list(), list()
@@ -326,21 +326,21 @@ def build_env_images(
                     future.result()
                     successful.append(futures[future])
                 except BuildImageError as e:
-                    print(f"BuildImageError {e.image_name}")
+                    print(f"镜像构建错误：{e.image_name}")
                     traceback.print_exc()
                     failed.append(futures[future])
                     continue
                 except Exception:
-                    print("Error building image")
+                    print("镜像构建失败")
                     traceback.print_exc()
                     failed.append(futures[future])
                     continue
 
     # Show how many images failed to build
     if len(failed) == 0:
-        print("All environment images built successfully.")
+        print("全部环境镜像构建成功。")
     else:
-        print(f"{len(failed)} environment images failed to build.")
+        print(f"{len(failed)} 个环境镜像构建失败。")
 
     # Return the list of (un)successfuly built images
     return successful, failed
@@ -372,8 +372,8 @@ def build_instance_images(
         # Don't build images for instances that depend on failed-to-build env images
         dont_run_specs = [spec for spec in test_specs if spec.env_image_key in env_failed]
         test_specs = [spec for spec in test_specs if spec.env_image_key not in env_failed]
-        print(f"Skipping {len(dont_run_specs)} instances - due to failed env image builds")
-    print(f"Building instance images for {len(test_specs)} instances")
+        print(f"因环境镜像构建失败，跳过 {len(dont_run_specs)} 个任务")
+    print(f"正在为 {len(test_specs)} 个任务构建任务镜像")
     successful, failed = list(), list()
 
     # Build the instance images
@@ -401,21 +401,21 @@ def build_instance_images(
                     future.result()
                     successful.append(futures[future])
                 except BuildImageError as e:
-                    print(f"BuildImageError {e.image_name}")
+                    print(f"镜像构建错误：{e.image_name}")
                     traceback.print_exc()
                     failed.append(futures[future])
                     continue
                 except Exception:
-                    print("Error building image")
+                    print("镜像构建失败")
                     traceback.print_exc()
                     failed.append(futures[future])
                     continue
 
     # Show how many images failed to build
     if len(failed) == 0:
-        print("All instance images built successfully.")
+        print("全部任务镜像构建成功。")
     else:
-        print(f"{len(failed)} instance images failed to build.")
+        print(f"{len(failed)} 个任务镜像构建失败。")
 
     # Return the list of (un)successfuly built images
     return successful, failed
@@ -458,8 +458,8 @@ def build_instance_image(
             logger,
         ) from e
     logger.info(
-        f"Environment image {env_image_name} found for {test_spec.instance_id}\n"
-        f"Building instance image {image_name} for {test_spec.instance_id}"
+        f"已找到任务 {test_spec.instance_id} 的环境镜像 {env_image_name}\n"
+        f"正在构建任务 {test_spec.instance_id} 的任务镜像 {image_name}"
     )
 
     # Check if the instance image already exists
@@ -490,7 +490,7 @@ def build_instance_image(
             repo=test_spec.repo
         )
     else:
-        logger.info(f"Image {image_name} already exists, skipping build.")
+        logger.info(f"镜像 {image_name} 已存在，跳过构建。")
 
     if new_logger:
         close_logger(logger)
@@ -529,7 +529,7 @@ def build_container(
         nano_cpus = config.get("nano_cpus")
 
         # Create the container
-        logger.info(f"Creating container for {test_spec.instance_id}...")
+        logger.info(f"正在为任务 {test_spec.instance_id} 创建容器……")
         container = client.containers.create(
             image=test_spec.instance_image_key,
             name=test_spec.get_instance_container_name(run_id),
@@ -539,11 +539,11 @@ def build_container(
             nano_cpus=nano_cpus,
             platform=test_spec.platform,
         )
-        logger.info(f"Container for {test_spec.instance_id} created: {container.id}")
+        logger.info(f"任务 {test_spec.instance_id} 的容器已创建：{container.id}")
         return container
     except Exception as e:
         # If an error occurs, clean up the container and raise an exception
-        logger.error(f"Error creating container for {test_spec.instance_id}: {e}")
+        logger.error(f"创建任务 {test_spec.instance_id} 的容器失败：{e}")
         logger.info(traceback.format_exc())
         cleanup_container(client, container, logger)
         raise BuildImageError(test_spec.instance_id, str(e), logger) from e

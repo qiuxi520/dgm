@@ -87,16 +87,16 @@ def remove_image(client, image_id, logger=None):
         log_info = logger.info
         raise_error = False
     try:
-        log_info(f"Attempting to remove image {image_id}...")
+        log_info(f"正在尝试移除镜像 {image_id}...")
         client.images.remove(image_id, force=True)
-        log_info(f"Image {image_id} removed.")
+        log_info(f"镜像 {image_id} 已移除。")
     except docker.errors.ImageNotFound:
-        log_info(f"Image {image_id} not found, removing has no effect.")
+        log_info(f"未找到镜像 {image_id}，无需移除。")
     except Exception as e:
         if raise_error:
             raise e
         log_error(
-            f"Failed to remove image {image_id}: {e}\n" f"{traceback.format_exc()}"
+            f"移除镜像失败：{image_id}: {e}\n" f"{traceback.format_exc()}"
         )
 
 
@@ -134,11 +134,11 @@ def cleanup_container(client, container, logger):
     # Attempt to stop the container
     try:
         if container:
-            log_info(f"Attempting to stop container {container.name}...")
+            log_info(f"正在尝试停止容器 {container.name}...")
             container.stop(timeout=15)
     except Exception as e:
         log_error(
-            f"Failed to stop container {container.name}: {e}. Trying to forcefully kill..."
+            f"停止容器 {container.name} 失败：{e}。正在尝试强制终止……"
         )
         try:
             # Get the PID of the container
@@ -148,29 +148,29 @@ def cleanup_container(client, container, logger):
             # If container PID found, forcefully kill the container
             if pid > 0:
                 log_info(
-                    f"Forcefully killing container {container.name} with PID {pid}..."
+                    f"正在强制终止容器 {container.name}，进程 ID：{pid}……"
                 )
                 os.kill(pid, signal.SIGKILL)
             else:
-                log_error(f"PID for container {container.name}: {pid} - not killing.")
+                log_error(f"容器 {container.name} 的进程 ID 为 {pid}，跳过终止。")
         except Exception as e2:
             if raise_error:
                 raise e2
             log_error(
-                f"Failed to forcefully kill container {container.name}: {e2}\n"
+                f"强制终止容器失败：{container.name}: {e2}\n"
                 f"{traceback.format_exc()}"
             )
 
     # Attempt to remove the container
     try:
-        log_info(f"Attempting to remove container {container.name}...")
+        log_info(f"正在尝试移除容器 {container.name}...")
         container.remove(force=True)
-        log_info(f"Container {container.name} removed.")
+        log_info(f"容器 {container.name} 已移除。")
     except Exception as e:
         if raise_error:
             raise e
         log_error(
-            f"Failed to remove container {container.name}: {e}\n"
+            f"移除容器失败：{container.name}: {e}\n"
             f"{traceback.format_exc()}"
         )
 
@@ -238,7 +238,7 @@ def find_dependent_images(client: docker.DockerClient, image_name: str):
         base_image = client.images.get(image_name)
         base_image_id = base_image.id
     except docker.errors.ImageNotFound:
-        print(f"Base image {image_name} not found.")
+        print(f"未找到基础镜像 {image_name}。")
         return []
 
     for image in all_images:
@@ -286,16 +286,16 @@ def clean_images(
     """
     images = list_images(client)
     removed = 0
-    print("Cleaning cached images...")
+    print("正在清理缓存镜像……")
     for image_name in images:
         if should_remove(image_name, cache_level, clean, prior_images):
             try:
                 remove_image(client, image_name, "quiet")
                 removed += 1
             except Exception as e:
-                print(f"Error removing image {image_name}: {e}")
+                print(f"移除镜像失败：{image_name}: {e}")
                 continue
-    print(f"Removed {removed} images.")
+    print(f"已移除 {removed} 个镜像。")
 
 
 def should_remove(

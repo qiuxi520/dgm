@@ -4,12 +4,40 @@ import json
 # 这里提供 API 调用而非自进化算法；真正执行编辑工具的循环在 llm_withtools.py。
 import os
 import re
+from pathlib import Path
 
 import anthropic
 import backoff
 import openai
+from dotenv import load_dotenv
+
+# 调试器和命令行均读取项目配置；显式设置的环境变量优先。
+load_dotenv(Path(__file__).resolve().parent / '.env', override=False)
 
 MAX_OUTPUT_TOKENS = 4096
+DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL") or "deepseek-v4-flash"
+
+
+def deepseek_request_options():
+    """纯文本与工具调用使用相同的 DeepSeek 配置。"""
+    return {
+        "max_tokens": int(os.getenv("DEEPSEEK_MAX_TOKENS") or "8192"),
+        "extra_body": {
+            "thinking": {"type": os.getenv("DEEPSEEK_THINKING") or "enabled"},
+        },
+    }
+
+
+def llm_environment():
+    """将模型配置显式传给容器；.env 不进入 Docker 镜像。"""
+    names = (
+        "DEEPSEEK_API_KEY", "DEEPSEEK_BASE_URL", "DEEPSEEK_MODEL",
+        "DEEPSEEK_THINKING", "DEEPSEEK_MAX_TOKENS",
+        "ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AWS_REGION",
+        "AWS_REGION_NAME", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+    )
+    return {name: os.environ[name] for name in names if os.getenv(name)}
+
 AVAILABLE_LLMS = [
     # Anthropic models
     "claude-3-5-sonnet-20240620",
@@ -41,6 +69,7 @@ AVAILABLE_LLMS = [
     "deepseek-chat",
     "deepseek-coder",
     "deepseek-reasoner",
+    "deepseek-v4-flash",
 ]
 
 def create_client(model: str):
@@ -54,11 +83,11 @@ def create_client(model: str):
         Tuple[Any, str]: A tuple containing the client instance and the client model name.
     """
     if model.startswith("claude-"):
-        print(f"Using Anthropic API with model {model}.")
+        print(f"使用 Anthropic API，模型：{model}.")
         return anthropic.Anthropic(), model
     elif model.startswith("bedrock") and "claude" in model:
         client_model = model.split("/")[-1]
-        print(f"Using Amazon Bedrock with model {client_model}.")
+        print(f"使用 Amazon Bedrock，模型：{client_model}.")
         client = anthropic.AnthropicBedrock(
             aws_access_key=os.getenv("AWS_ACCESS_KEY_ID"),
             aws_secret_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
@@ -67,20 +96,20 @@ def create_client(model: str):
         return client, client_model
     elif model.startswith("vertex_ai") and "claude" in model:
         client_model = model.split("/")[-1]
-        print(f"Using Vertex AI with model {client_model}.")
+        print(f"使用 Vertex AI，模型：{client_model}.")
         return anthropic.AnthropicVertex(), client_model
     elif 'gpt' in model or model.startswith("o1-") or model.startswith("o3-"):
-        print(f"Using OpenAI API with model {model}.")
+        print(f"使用 OpenAI API，模型：{model}.")
         return openai.OpenAI(), model
     elif model.startswith("deepseek-"):
-        print(f"Using OpenAI API with {model}.")
+        print(f"使用 DeepSeek API，模型：{model}。")
         client = openai.OpenAI(
             api_key=os.environ["DEEPSEEK_API_KEY"],
-            base_url="https://api.deepseek.com"
+            base_url=os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
         )
         return client, model
     elif model == "llama3.1-405b":
-        print(f"Using OpenAI API with {model}.")
+        print(f"使用 OpenAI API，模型：{model}.")
         client = openai.OpenAI(
             api_key=os.environ["OPENROUTER_API_KEY"],
             base_url="https://openrouter.ai/api/v1"
@@ -159,11 +188,11 @@ def get_batch_responses_from_llm(
 
     if print_debug:
         print()
-        print("*" * 20 + " LLM START " + "*" * 20)
+        print("*" * 20 + " 模型对话开始 " + "*" * 20)
         for j, msg in enumerate(new_msg_history[0]):
             print(f'{j}, {msg["role"]}: {msg["content"]}')
         print(content)
-        print("*" * 21 + " LLM END " + "*" * 21)
+        print("*" * 21 + " 模型对话结束 " + "*" * 21)
         print()
 
     return content, new_msg_history
@@ -183,7 +212,7 @@ def get_response_from_llm(
         temperature=0.7,
 ):
     # 返回 (响应文本, 追加后的对话历史)，各供应商的历史格式在分支中适配。
-    # 诊断使用的 o1/o3 分支把 system_message 拼接进 user 消息，温度固定为 1。
+    # 默认诊断走 DeepSeek；保留 o1/o3 的兼容分支（将 system_message 拼接进 user）。
     if msg_history is None:
         msg_history = []
 
@@ -250,7 +279,7 @@ def get_response_from_llm(
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
-    elif model in ["deepseek-chat", "deepseek-coder"]:
+    elif model.startswith("deepseek-") and model != "deepseek-reasoner":
         new_msg_history = msg_history + [{"role": "user", "content": msg}]
         response = client.chat.completions.create(
             model=model,
@@ -259,9 +288,7 @@ def get_response_from_llm(
                 *new_msg_history,
             ],
             temperature=temperature,
-            max_tokens=MAX_OUTPUT_TOKENS,
-            n=1,
-            stop=None,
+            **deepseek_request_options(),
         )
         content = response.choices[0].message.content
         new_msg_history = new_msg_history + [{"role": "assistant", "content": content}]
@@ -301,10 +328,10 @@ def get_response_from_llm(
         raise ValueError(f"Model {model} not supported.")
     if print_debug:
         print()
-        print("*" * 20 + " LLM START " + "*" * 20)
-        print(f'User: {new_msg_history[-2]["content"]}')
-        print(f'Assistant: {new_msg_history[-1]["content"]}')
-        print("*" * 21 + " LLM END " + "*" * 21)
+        print("*" * 20 + " 模型对话开始 " + "*" * 20)
+        print(f'用户：{new_msg_history[-2]["content"]}')
+        print(f'助手：{new_msg_history[-1]["content"]}')
+        print("*" * 21 + " 模型对话结束 " + "*" * 21)
         print()
     return content, new_msg_history
 

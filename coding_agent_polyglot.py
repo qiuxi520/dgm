@@ -1,5 +1,5 @@
 # 中文导读：多语言基准使用的初始代理；自修改容器中会重命名为 coding_agent.py。
-# 与 SWE 版本共享工具循环与补丁导出机制，但自修改时切换到 OPENAI_MODEL。
+# 与 SWE 版本共享工具循环与补丁导出机制，模型常量均读取环境配置。
 import argparse
 import subprocess
 import logging
@@ -94,7 +94,7 @@ def safe_log(message, level=logging.INFO):
     if logger:
         logger.log(level, message)
     else:
-        print(f"Warning: No logger found for thread {threading.get_ident()}")
+        print(f"警告：未找到线程的日志记录器，线程 ID：{threading.get_ident()}")
 
 class AgenticSystem:
     # language 记录题目语言；当前 forward 没有按 language 构造额外分支。

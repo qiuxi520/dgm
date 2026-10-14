@@ -165,7 +165,7 @@ if __name__ == "__main__":
 
     # Check if the script is called with arguments
     if len(sys.argv) < 2:
-        print("Usage: python bash.py '<command>'")
+        print("用法：python bash.py '<command>'")
     else:
         # Extract the command from the command-line arguments
         input_command = ' '.join(sys.argv[1:])

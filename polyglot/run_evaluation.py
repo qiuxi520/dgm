@@ -104,13 +104,13 @@ def run_instance(
         # Build + start instance container (instance image should already be built)
         container = build_container(test_spec, client, run_id, logger, rm_image, force_rebuild)
         container.start()
-        logger.info(f"Container for {instance_id} started: {container.id}")
+        logger.info(f"任务 {instance_id} 的容器已启动：{container.id}")
 
         # Copy model prediction as patch file to container
         patch_file = Path(log_dir / "patch.diff")
         patch_file.write_text(pred["model_patch"] or "")
         logger.info(
-            f"Intermediate patch for {instance_id} written to {patch_file}, now applying to container..."
+            f"任务 {instance_id} 的中间补丁已写入 {patch_file}，正在应用到容器……"
         )
         copy_to_container(container, patch_file, Path("/tmp/patch.diff"))
 
@@ -121,7 +121,7 @@ def run_instance(
             user="root",
         )
         if val.exit_code != 0:
-            logger.info(f"Failed to apply patch to container, trying again...")
+            logger.info(f"补丁应用到容器失败，正在重试……")
             
             # try "patch --batch --fuzz=5 -p1 -i {patch_path}" to try again
             val = container.exec_run(
@@ -145,22 +145,22 @@ def run_instance(
         git_diff_output_before = (
             container.exec_run("git diff", workdir="/testbed").output.decode("utf-8").strip()
         )
-        logger.info(f"Git diff before:\n{git_diff_output_before}")
+        logger.info(f"评估前的 Git 差异：\n{git_diff_output_before}")
 
         eval_file = Path(log_dir / "eval.sh")
         eval_file.write_text(test_spec.eval_script)
         logger.info(
-            f"Eval script for {instance_id} written to {eval_file}; copying to container..."
+            f"任务 {instance_id} 的评估脚本已写入 {eval_file}，正在复制到容器……"
         )
         copy_to_container(container, eval_file, Path("/eval.sh"))
 
         # Run eval script, write output to logs
         test_output, timed_out, total_runtime = exec_run_with_timeout(container, "/bin/bash /eval.sh", timeout)
         test_output_path = log_dir / "test_output.txt"
-        logger.info(f'Test runtime: {total_runtime:_.2f} seconds')
+        logger.info(f'测试耗时：{total_runtime:_.2f} 秒')
         with open(test_output_path, "w") as f:
             f.write(test_output)
-            logger.info(f"Test output for {instance_id} written to {test_output_path}")
+            logger.info(f"任务 {instance_id} 的测试输出已写入 {test_output_path}")
             if timed_out:
                 f.write(f"\n\nTimeout error: {timeout} seconds exceeded.")
                 raise EvaluationError(
@@ -175,12 +175,12 @@ def run_instance(
         )
 
         # Check if git diff changed after running eval script
-        logger.info(f"Git diff after:\n{git_diff_output_after}")
+        logger.info(f"评估后的 Git 差异：\n{git_diff_output_after}")
         if git_diff_output_after != git_diff_output_before:
-            logger.info(f"Git diff changed after running eval script")
+            logger.info(f"运行评估脚本后 Git 差异发生变化")
 
         # Get report from test output
-        logger.info(f"Grading answer for {instance_id}...")
+        logger.info(f"正在对任务 {instance_id} 的答案评分……")
         report = get_eval_report(
             test_spec=test_spec,
             prediction=pred,
@@ -188,8 +188,8 @@ def run_instance(
             include_tests_status=True,
         )
         logger.info(
-            f"report: {report}\n"
-            f"Result for {instance_id}: resolved: {report[instance_id]['resolved']}"
+            f"报告：{report}\n"
+            f"任务 {instance_id} 的结果，是否解决：{report[instance_id]['resolved']}"
         )
 
         # Write report to report.json
@@ -205,9 +205,9 @@ def run_instance(
         logger.info(error_msg)
         print(e)
     except Exception as e:
-        error_msg = (f"Error in evaluating model for {instance_id}: {e}\n"
+        error_msg = (f"评估模型失败，任务：{instance_id}: {e}\n"
                      f"{traceback.format_exc()}\n"
-                     f"Check ({logger.log_file}) for more information.")
+                     f"详细信息请查看 {logger.log_file}。")
         logger.error(error_msg)
     finally:
         # Remove instance container + image, close logger
@@ -251,10 +251,10 @@ def run_instances(
         for tag in i.tags if tag in instance_image_ids
     }
     if not force_rebuild and len(existing_images):
-        print(f"Found {len(existing_images)} existing instance images. Will reuse them.")
+        print(f"发现 {len(existing_images)} 个已有任务镜像，将复用。")
 
     # run instances in parallel
-    print(f"Running {len(instances)} instances...")
+    print(f"正在运行 {len(instances)} 个任务……")
     with tqdm(total=len(instances), smoothing=0) as pbar:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Create a future for running each instance
@@ -285,7 +285,7 @@ def run_instances(
                 except Exception as e:
                     traceback.print_exc()
                     continue
-    print("All instances run.")
+    print("全部任务运行完毕。")
 
 
 def get_dataset_from_preds(
@@ -309,7 +309,7 @@ def get_dataset_from_preds(
         # check that all instance IDs have predictions
         missing_preds = set(instance_ids) - set(predictions.keys())
         if missing_preds:
-            print(f"Warning: Missing predictions for {len(missing_preds)} instance IDs.")
+            print(f"警告：{len(missing_preds)} 个任务 ID 缺少预测结果。")
     
     # check that all prediction IDs are in the dataset
     prediction_ids = set(predictions.keys())
@@ -342,7 +342,7 @@ def get_dataset_from_preds(
 
     if completed_ids and exclude_completed:
         # filter dataset to only instances that have not been run
-        print(f"{len(completed_ids)} instances already run, skipping...")
+        print(f"{len(completed_ids)} 个任务已运行，跳过……")
         dataset = [i for i in dataset if i[KEY_INSTANCE_ID] not in completed_ids]
 
     empty_patch_ids = {k for k, v in predictions.items() if v["model_patch"] == "" or v["model_patch"] is None}
@@ -427,16 +427,16 @@ def make_run_report(
 
     # print final report
     dataset_ids = {i[KEY_INSTANCE_ID] for i in full_dataset}
-    print(f"Total instances: {len(full_dataset)}")
-    print(f"Instances submitted: {len(set(predictions.keys()) & dataset_ids)}")
-    print(f"Instances completed: {len(completed_ids)}")
-    print(f"Instances incomplete: {len(incomplete_ids)}")
-    print(f"Instances resolved: {len(resolved_ids)}")
-    print(f"Instances unresolved: {len(unresolved_ids)}")
-    print(f"Instances with empty patches: {len(empty_patch_ids)}")
-    print(f"Instances with errors: {len(error_ids)}")
-    print(f"Unstopped containers: {len(unstopped_containers)}")
-    print(f"Unremoved images: {len(unremoved_images)}")
+    print(f"任务总数：{len(full_dataset)}")
+    print(f"已提交任务数：{len(set(predictions.keys()) & dataset_ids)}")
+    print(f"已完成任务数：{len(completed_ids)}")
+    print(f"未完成任务数：{len(incomplete_ids)}")
+    print(f"已解决任务数：{len(resolved_ids)}")
+    print(f"未解决任务数：{len(unresolved_ids)}")
+    print(f"补丁为空的任务数：{len(empty_patch_ids)}")
+    print(f"出错任务数：{len(error_ids)}")
+    print(f"未停止的容器数：{len(unstopped_containers)}")
+    print(f"未移除的镜像数：{len(unremoved_images)}")
 
     # write report to file
     report = {
@@ -466,7 +466,7 @@ def make_run_report(
     )
     with open(report_file, "w") as f:
         print(json.dumps(report, indent=4), file=f)
-    print(f"Report written to {report_file}")
+    print(f"报告已写入 {report_file}")
     return report_file
 
 
@@ -507,7 +507,7 @@ def main(
 
     # load predictions as map of instance_id to prediction
     if predictions_path == 'gold':
-        print("Using gold predictions - ignoring predictions_path")
+        print("使用标准答案预测，忽略 predictions_path")
         predictions = get_gold_predictions(dataset_name, split)
     else:
         if predictions_path.endswith(".json"):
@@ -524,9 +524,9 @@ def main(
     dataset = get_dataset_from_preds(dataset_name, split, instance_ids, predictions, run_id)
     full_dataset = load_swebench_dataset(dataset_name, split, instance_ids)
     existing_images = list_images(client)
-    print(f"Running {len(dataset)} unevaluated instances...")
+    print(f"正在运行 {len(dataset)} 个尚未评估的任务……")
     if not dataset:
-        print("No instances to run.")
+        print("没有需要运行的任务。")
     else:
         # build environment images + run instances
         build_env_images(client, dataset, force_rebuild, max_workers)

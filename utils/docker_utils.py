@@ -59,7 +59,7 @@ def safe_log(message: str, level: int = logging.INFO):
     if logger:
         logger.log(level, message)
     else:
-        print(f"Warning: No logger found for thread {threading.get_ident()}")
+        print(f"警告：未找到线程的日志记录器，线程 ID：{threading.get_ident()}")
 
 def remove_existing_container(client, container_name):
     """
@@ -67,14 +67,14 @@ def remove_existing_container(client, container_name):
     """
     try:
         existing_container = client.containers.get(container_name)
-        safe_log(f"Removing existing container with name {container_name}")
+        safe_log(f"正在移除已有容器：{container_name}")
         existing_container.stop()
         existing_container.remove()
     except docker.errors.NotFound:
         # Container does not exist, no action needed
-        safe_log(f"No existing container with name {container_name} found.")
+        safe_log(f"未找到名为 {container_name} 的已有容器。")
     except docker.errors.APIError as e:
-        safe_log(f"Error removing existing container {container_name}: {e}", logging.ERROR)
+        safe_log(f"移除已有容器失败：{container_name}: {e}", logging.ERROR)
         raise
 
 def create_archive(path: Union[str, Path], data: Optional[bytes] = None) -> bytes:
@@ -119,37 +119,37 @@ def build_dgm_container(
     try:
         # Build the Docker image if force_rebuild is set or the image doesn't exist
         if force_rebuild or not any(image.tags for image in client.images.list() if image_name in image.tags):
-            safe_log("Building the Docker image...")
+            safe_log("正在构建 Docker 镜像……")
             image, logs = client.images.build(path=repo_path, tag=image_name, rm=True)
             for log_entry in logs:
                 if 'stream' in log_entry:
                     safe_log(log_entry['stream'].strip())
-            safe_log("Image built successfully.")
+            safe_log("镜像构建成功。")
         else:
-            safe_log(f"Docker image '{image_name}' already exists. Skipping build.")
+            safe_log(f"Docker 镜像 '{image_name}' 已存在，跳过构建。")
             # Fetch the existing image
             image = next((img for img in client.images.list() if image_name in img.tags), None)
     except Exception as e:
-        safe_log(f"Error while building the Docker image: {e}")
+        safe_log(f"构建 Docker 镜像失败：{e}")
         return None
 
     try:
         # Run the container
         container = client.containers.run(image=image_name, name=container_name, detach=True)
-        safe_log(f"Container '{container_name}' started successfully.")
+        safe_log(f"容器 '{container_name}' 启动成功。")
         return container
     except Exception as e:
-        safe_log(f"Error while starting the container: {e}")
+        safe_log(f"启动容器失败：{e}")
         return None
 
 def cleanup_container(container):
     """
     Stops and removes the specified Docker container.
     """
-    safe_log(f"Stopping container '{container.name}'...")
+    safe_log(f"正在停止容器 '{container.name}'……")
     container.stop()
     container.remove()
-    safe_log(f"Container '{container.name}' removed.")
+    safe_log(f"容器 '{container.name}' 已移除。")
 
 def copy_to_container(container, source_path: Union[str, Path], dest_path: Union[str, Path]) -> None:
     # Docker 的 put_archive 接收 tar 字节；文件可改名，目录以其自身名称作为归档根。
@@ -187,16 +187,16 @@ def copy_to_container(container, source_path: Union[str, Path], dest_path: Union
         # Create destination directory in container if it doesn't exist
         container.exec_run(f"mkdir -p {container_dest_dir}")
 
-        safe_log(f"Copying {source_path} to container at {dest_path}")
+        safe_log(f"正在将 {source_path} 复制到容器路径 {dest_path}")
         success = container.put_archive(container_dest_dir, archive)
         
         if not success:
             raise Exception(f"Failed to copy {source_path} to container")
             
-        safe_log(f"Successfully copied {source_path} to container")
+        safe_log(f"已将 {source_path} 复制到容器")
         
     except Exception as e:
-        safe_log(f"Error copying to container: {e}", logging.ERROR)
+        safe_log(f"复制到容器失败：{e}", logging.ERROR)
         raise
 
 def copy_from_container(container, source_path: Union[str, Path], dest_path: Union[str, Path]) -> None:
@@ -229,7 +229,7 @@ def copy_from_container(container, source_path: Union[str, Path], dest_path: Uni
         # Create destination directory if it doesn't exist
         dest_path.parent.mkdir(parents=True, exist_ok=True)
         
-        safe_log(f"Copying from container {source_path} to local path {dest_path}")
+        safe_log(f"正在将容器中的 {source_path} 复制到本地路径 {dest_path}")
         
         # Get archive from container
         bits, stat = container.get_archive(str(source_path))
@@ -257,10 +257,10 @@ def copy_from_container(container, source_path: Union[str, Path], dest_path: Uni
                 if extracted_path != dest_path and extracted_path.exists():
                     extracted_path.rename(dest_path)
         
-        safe_log(f"Successfully copied from container to {dest_path}")
+        safe_log(f"已从容器复制到 {dest_path}")
         
     except Exception as e:
-        safe_log(f"Error copying from container: {e}", logging.ERROR)
+        safe_log(f"从容器复制失败：{e}", logging.ERROR)
         raise
 
 def log_container_output(exec_result):
@@ -271,15 +271,15 @@ def log_container_output(exec_result):
     # Handle output logging
     if isinstance(exec_result.output, bytes):
         # Handle non-streaming output
-        safe_log(f"Container output: {exec_result.output.decode()}")
+        safe_log(f"容器输出：{exec_result.output.decode()}")
     else:
         # Handle streaming output
         for chunk in exec_result.output:
             if chunk:
-                safe_log(f"Container output: {chunk.decode().strip()}")
+                safe_log(f"容器输出：{chunk.decode().strip()}")
     
     # Check exit code
     if exec_result.exit_code and exec_result.exit_code != 0:
-        error_msg = f"Script failed with exit code {exec_result.exit_code}"
+        error_msg = f"脚本执行失败，退出码：{exec_result.exit_code}"
         safe_log(error_msg, logging.ERROR)
         raise Exception(error_msg)

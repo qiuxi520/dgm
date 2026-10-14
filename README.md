@@ -28,10 +28,12 @@
 以下保留原项目的 Linux/Bash 命令。源码与容器脚本使用 `/bin/bash`、`cp`、`patch` 和 `timeout` 等 Linux 工具；Windows 用户应在配好 Docker 的 Linux 环境（例如 WSL）中运行，而不是直接把这些命令粘贴到 PowerShell。
 
 ```bash
-# 配置 API 密钥，可添加到 ~/.bashrc
-export OPENAI_API_KEY='...'
-export ANTHROPIC_API_KEY='...'
+# 使用项目配置文件；已有 .env 时直接编辑其中的 DeepSeek 配置
+cp .env.example .env
+# 填写 DEEPSEEK_API_KEY，默认模型为 deepseek-v4-flash
 ```
+
+项目会自动加载根目录下的 `.env`，已有环境变量优先；VS Code 调试配置也会读取它。`.env` 已被 Git 和 Docker 构建忽略，请勿提交真实密钥。编程代理、失败诊断、改进诊断和辅助评分统一使用 `DEEPSEEK_MODEL`，不需要 OpenAI 或 AWS 凭据。`DEEPSEEK_BASE_URL` 默认为 `https://api.deepseek.com`，`DEEPSEEK_THINKING` 控制思考模式（`enabled` 或 `disabled`），`DEEPSEEK_MAX_TOKENS` 控制输出上限（默认 8192）。容器中的代理通过环境变量接收同一份配置。
 
 ```bash
 # 验证当前环境中的 Docker 是否配置正确
@@ -67,7 +69,7 @@ cd ../../
 python -m polyglot.prepare_polyglot_dataset
 ```
 
-源码中的默认编程模型通过 Amazon Bedrock 调用 Claude，失败诊断使用 OpenAI 模型。除上述密钥外，默认 Bedrock 路径还需要配置 `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY` 和 `AWS_REGION_NAME`；客户端选择见 [`llm.py`](llm.py)，编程模型常量见 [`llm_withtools.py`](llm_withtools.py)。这些是当前源码中的默认设置。
+默认通过 DeepSeek Chat Completions 调用原生工具，并在后续工具请求中回传 `reasoning_content`。模型和客户端配置见 [`llm.py`](llm.py)，编程工具循环见 [`llm_withtools.py`](llm_withtools.py)。修改源码后，应重新构建已有的 DGM 镜像：`docker build -t dgm .`。
 
 ## 运行 DGM
 ```bash

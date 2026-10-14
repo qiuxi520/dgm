@@ -40,7 +40,7 @@ def get_model_patch_paths(root_dir, dgm_dir, parent_commit):
         if os.path.exists(parent_patch_file):
             patch_files.append(parent_patch_file)
         else:
-            print(f"Parent patch file not found: {parent_patch_file}")
+            print(f"未找到父代补丁文件：{parent_patch_file}")
         # find next parent commit in the metadata
         parent_metadata = load_json_file(os.path.join(parent_dir, "metadata.json"))
         prev_commit = parent_metadata.get('parent_commit', 'initial')
@@ -68,7 +68,7 @@ def get_all_performance(run_keyword, results_dir='./swe_bench'):
     
     # Return an empty list if no matches are found
     if not matching_files:
-        print(f"No evaluation files found matching the keyword '{run_keyword}'.")
+        print(f"未找到匹配关键词 '{run_keyword}' 的评估文件。")
         return None, None
     
     # Process each matching file
@@ -122,20 +122,20 @@ def is_compiled_self_improve(metadata, num_swe_issues=[], logger=None):
 
     # 1. Must have the required keys
     if not overall_perf or not all(k in overall_perf for k in required_keys):
-        logger.info(f"no required keys")
+        logger.info(f"缺少必需字段")
         return False
 
     # 2. Must have at least one non-empty patch
     num_resolved = len(overall_perf['total_resolved_ids'])
     num_unresolved = len(overall_perf['total_unresolved_ids'])
     if (num_resolved + num_unresolved) == 0:
-        logger.info(f"no non-empty patch")
+        logger.info(f"缺少非空补丁")
         return False
 
     # 3. If specified, total evaluated must match num_swe_issues, else it means that some didn't compile
     total_evaluated = overall_perf['total_submitted_instances']
     if total_evaluated < num_swe_issues[0]:
-        logger.info(f"not match num_issues")
+        logger.info(f"任务数量不匹配")
         return False
 
     return True

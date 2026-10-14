@@ -29,7 +29,7 @@ def load_all_tools(logging=print):
                 raise Exception(f"Tool module {module_name} does not have required functions.")
         except Exception as e:
             # Log the error and raise it
-            logging(f"Failed to import {module_name}: {e}")
+            logging(f"导入模块失败：{module_name}: {e}")
             raise e
     
     return tools

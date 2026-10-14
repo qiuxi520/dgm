@@ -26,7 +26,7 @@ def load_predictions(paths):
             raise err
 
         if "instance_id" not in pred:
-            print("Skipping json without instance_id", fname)
+            print("跳过缺少 instance_id 的 JSON 文件", fname)
             continue
 
         inst = pred["instance_id"]
@@ -123,7 +123,7 @@ def make_report(
         predictions = load_predictions([dname])
         predictions_jsonl = preds_to_jsonl(dname, predictions)
         run_evals(predictions_jsonl, run_id, dataset_name, root_dir, output_dir, num_eval_procs=num_eval_procs)
-        print(f"Report generated for {dname}")
+        print(f"已生成报告：{dname}")
     
     # Use ThreadPoolExecutor to parallelize over dnames
     if run_ids is None or len(run_ids) != len(dnames):
@@ -133,7 +133,7 @@ def make_report(
     with ThreadPoolExecutor(max_workers=dnames_workers) as executor:
         executor.map(process_single_dname, dnames, run_ids)
 
-    print("All reports generated.")
+    print("全部报告已生成。")
 
 def main():
     parser = argparse.ArgumentParser(description="Run evaluations on predictions.")

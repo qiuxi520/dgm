@@ -105,11 +105,11 @@ def make_plot(all_iterations, all_infos, info_label, all_its=False):
     if not os.path.exists(os.path.dirname(save_path_png)):
         os.makedirs(os.path.dirname(save_path_png))
     plt.savefig(save_path_png)
-    print(f"Progress plot saved at {save_path_png}")
+    print(f"进度图已保存至 {save_path_png}")
     # Save with transparent background
     save_path_pdf = f"./analysis/output/dgm_comparisons_{info_label}.pdf"
     plt.savefig(save_path_pdf, transparent=True)
-    print(f"Progress plot saved at {save_path_pdf}")
+    print(f"进度图已保存至 {save_path_pdf}")
     plt.close()
 
 def main():

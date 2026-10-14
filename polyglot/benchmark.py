@@ -21,7 +21,7 @@ import lox
 import pandas as pd
 import prompts
 import typer
-from dotenv import load_dotenv
+from llm import DEFAULT_MODEL
 from plots import plot_refactoring
 from rich.console import Console
 
@@ -37,13 +37,15 @@ EXERCISES_DIR_DEFAULT = "polyglot-benchmark"
 app = typer.Typer(add_completion=False, pretty_exceptions_enable=False)
 
 
-load_dotenv(override=True)
+# Aider/LiteLLM 使用供应商前缀；共享 DGM 的密钥、模型和地址配置。
+AIDER_MODEL = f"deepseek/{DEFAULT_MODEL}"
+os.environ.setdefault("DEEPSEEK_API_BASE", os.getenv("DEEPSEEK_BASE_URL") or "https://api.deepseek.com")
 
 
 def find_latest_benchmark_dir():
     benchmark_dirs = [d for d in BENCHMARK_DNAME.iterdir() if d.is_dir()]
     if not benchmark_dirs:
-        print("Error: No benchmark directories found under tmp.benchmarks.")
+        print("错误：tmp.benchmarks 下没有基准目录。")
         sys.exit(1)
 
     # Get current time and 24 hours ago
@@ -64,7 +66,7 @@ def find_latest_benchmark_dir():
             continue
 
     if not recent_dirs:
-        print("Error: No benchmark directories found from the last 24 hours.")
+        print("错误：没有最近 24 小时内的基准目录。")
         sys.exit(1)
 
     # Find directory with most recently modified .md file
@@ -81,10 +83,10 @@ def find_latest_benchmark_dir():
                     latest_dir = d
 
     if not latest_dir:
-        print("Error: No .md files found in recent benchmark directories.")
+        print("错误：最近的基准目录中没有 .md 文件。")
         sys.exit(1)
 
-    print(f"Using the most recently updated benchmark directory: {latest_dir.name}")
+    print(f"使用最近更新的基准目录：{latest_dir.name}")
     return latest_dir
 
 
@@ -104,7 +106,7 @@ def show_stats(dirnames, graphs, stats_languages=None):
 
         if row.completed_tests != row.total_tests:
             print(
-                f"Warning: {row.dir_name} is incomplete: {row.completed_tests} of {row.total_tests}"
+                f"警告：{row.dir_name} 尚未完成，已完成 {row.completed_tests}/{row.total_tests}"
             )
 
         try:
@@ -140,10 +142,10 @@ def resolve_dirname(dirname, use_single_prior, make_new):
     priors = list(BENCHMARK_DNAME.glob(f"*--{dirname}"))
     if len(priors) == 1 and use_single_prior:
         dirname = priors[0].name
-        print(f"Using pre-existing {dirname}")
+        print(f"使用已有目录 {dirname}")
     elif len(priors):
         if not make_new:
-            print(f"Prior runs of {dirname} exist, use --new or name one explicitly")
+            print(f"{dirname} 已有运行记录，请使用 --new 或显式指定运行名称")
             print()
             for prior in priors:
                 print(prior)
@@ -162,7 +164,7 @@ def resolve_dirname(dirname, use_single_prior, make_new):
 def main(
     dirnames: Optional[List[str]] = typer.Argument(None, help="Directory names"),
     graphs: bool = typer.Option(False, "--graphs", help="Generate graphs"),
-    model: str = typer.Option("gpt-3.5-turbo", "--model", "-m", help="Model name"),
+    model: str = typer.Option(AIDER_MODEL, "--model", "-m", help="Model name"),
     sleep: float = typer.Option(
         0, "--sleep", help="Sleep seconds between tests when single threaded"
     ),
@@ -170,7 +172,7 @@ def main(
         None, "--languages", "-l", help="Only run tests for specific languages (comma separated)"
     ),
     edit_format: str = typer.Option(None, "--edit-format", "-e", help="Edit format"),
-    editor_model: str = typer.Option(None, "--editor-model", help="Editor model name"),
+    editor_model: str = typer.Option(AIDER_MODEL, "--editor-model", help="Editor model name"),
     editor_edit_format: str = typer.Option(None, "--editor-edit-format", help="Editor edit format"),
     replay: str = typer.Option(
         None,
@@ -223,7 +225,7 @@ def main(
         dirnames = []
 
     if len(dirnames) > 1 and not (stats_only or diffs_only):
-        print("Only provide 1 dirname unless running with --stats or --diffs")
+        print("未使用 --stats 或 --diffs 时只能提供一个目录名")
         return 1
 
     updated_dirnames = []
@@ -244,7 +246,7 @@ def main(
     dirname = updated_dirnames[0]
 
     if "AIDER_DOCKER" not in os.environ:
-        print("Warning: benchmarking runs unvetted code from GPT, run in a docker container")
+        print("警告：基准测试会运行 GPT 生成的未经验证的代码，请在 Docker 容器中运行")
         return
 
     assert BENCHMARK_DNAME.exists() and BENCHMARK_DNAME.is_dir(), BENCHMARK_DNAME
@@ -262,7 +264,7 @@ def main(
             lang_dirs = [d for d in lang_dirs if d.name.lower() in requested]
             dump(lang_dirs)
             if not lang_dirs:
-                print(f"No matching language directories found for: {languages}")
+                print(f"未找到匹配的语言目录：{languages}")
                 return []
 
         # Get all exercise dirs under exercises/practice for each language
@@ -280,15 +282,15 @@ def main(
     exercise_dirs = get_exercise_dirs(original_dname, languages)
 
     if not exercise_dirs:
-        print("No exercise directories found")
+        print("未找到练习目录")
         return 1
 
     if clean and dirname.exists():
-        print("Cleaning up and replacing", dirname)
+        print("正在清理并替换", dirname)
         dir_files = set(fn.name for fn in dirname.glob("*"))
         original_files = set(fn.name for fn in original_dname.glob("*"))
         if dir_files != original_files:
-            print("ERROR: will not delete dir that does not look like original tests", dirname)
+            print("错误：目录不符合原始测试目录结构，拒绝删除", dirname)
             return
 
         dest = dirname.parent / "OLD" / dirname.name
@@ -299,7 +301,7 @@ def main(
         dirname.rename(dest)
 
     if not dirname.exists():
-        print(f"Copying {original_dname} -> {dirname} ...")
+        print(f"正在复制 {original_dname} -> {dirname}……")
         # Only copy the practice subdirs with exercises
         os.makedirs(dirname, exist_ok=True)
         for lang_dir in original_dname.iterdir():
@@ -310,7 +312,7 @@ def main(
                 dest_lang_dir = dirname / lang_dir.name / "exercises" / "practice"
                 os.makedirs(dest_lang_dir.parent, exist_ok=True)
                 shutil.copytree(practice_dir, dest_lang_dir)
-        print("...done")
+        print("……完成")
 
     test_dnames = sorted(str(d.relative_to(original_dname)) for d in exercise_dirs)
 
@@ -323,11 +325,11 @@ def main(
             files_loaded = models.register_models([read_model_settings])
             if verbose:
                 if files_loaded:
-                    print(f"Loaded model settings from: {files_loaded[0]}")
+                    print(f"已加载模型配置：{files_loaded[0]}")
                 else:
-                    print(f"No model settings loaded from: {read_model_settings}")
+                    print(f"未加载模型配置：{read_model_settings}")
         except Exception as e:
-            print(f"Error loading model settings: {e}")
+            print(f"加载模型配置失败：{e}")
             return 1
 
     if keywords:
@@ -426,9 +428,9 @@ def show_diffs(dirnames):
 
     changed = set(testcases) - unchanged
     print()
-    print("changed:", len(changed), ",".join(sorted(changed)))
+    print("已变更：", len(changed), ",".join(sorted(changed)))
     print()
-    print("unchanged:", len(unchanged), ",".join(sorted(unchanged)))
+    print("未变更：", len(unchanged), ",".join(sorted(unchanged)))
 
 
 def load_results(dirname, stats_languages=None):
@@ -447,7 +449,7 @@ def load_results(dirname, stats_languages=None):
                 results = json.loads(fname.read_text())
                 all_results.append(results)
             except json.JSONDecodeError:
-                print("json.JSONDecodeError", fname)
+                print("JSON 解析错误", fname)
                 continue
     return all_results
 
@@ -526,10 +528,27 @@ def summarize_results(dirname, stats_languages=None):
     versions = get_versions(commit_hashes)
     date = dirname.name[:10]
 
+    display_labels = {
+        "model": "模型",
+        "edit_format": "编辑格式",
+        "commit_hash": "提交哈希",
+        "editor_model": "编辑模型",
+        "editor_edit_format": "编辑模型的编辑格式",
+        "error_outputs": "错误输出数",
+        "num_malformed_responses": "格式错误的响应数",
+        "num_with_malformed_responses": "出现格式错误响应的用例数",
+        "user_asks": "用户询问次数",
+        "lazy_comments": "省略实现的注释数",
+        "syntax_errors": "语法错误数",
+        "indentation_errors": "缩进错误数",
+        "exhausted_context_windows": "上下文窗口耗尽次数",
+        "test_timeouts": "测试超时次数",
+    }
+
     def show(stat, red="red"):
         val = getattr(res, stat)
         style = red if val else None
-        console.print(f"  {stat}: {val}", style=style)
+        console.print(f"  {display_labels.get(stat, stat)}：{val}", style=style)
 
     percents = dict()
     for i in range(tries):
@@ -539,9 +558,9 @@ def summarize_results(dirname, stats_languages=None):
         setattr(res, f"pass_rate_{i + 1}", f"{pass_rate:.1f}")
         setattr(res, f"pass_num_{i + 1}", passed_tests[i])
 
-    print(f"- dirname: {dirname.name}")
+    print(f"- 目录名：{dirname.name}")
     style = None if res.completed_tests == res.total_tests else "red"
-    console.print(f"  test_cases: {res.completed_tests}", style=style)
+    console.print(f"  测试用例数：{res.completed_tests}", style=style)
     for key, val in variants.items():
         if len(val) > 1:
             style = "red"
@@ -549,15 +568,15 @@ def summarize_results(dirname, stats_languages=None):
             style = None
         val = ", ".join(map(str, val))
         setattr(res, key, val)
-        console.print(f"  {key}: {val}", style=style)
+        console.print(f"  {display_labels.get(key, key)}：{val}", style=style)
 
     for i in range(tries):
-        print(f"  pass_rate_{i + 1}: {percents[i]:.1f}")
+        print(f"  通过率_{i + 1}: {percents[i]:.1f}")
     for i in range(tries):
-        print(f"  pass_num_{i + 1}: {passed_tests[i]}")
+        print(f"  通过数量_{i + 1}: {passed_tests[i]}")
 
     pct_well_formed = 1.0 - res.num_with_malformed_responses / res.completed_tests
-    print(f"  percent_cases_well_formed: {pct_well_formed * 100:.1f}")
+    print(f"  格式正确的用例比例：{pct_well_formed * 100:.1f}")
 
     show("error_outputs")
     show("num_malformed_responses")
@@ -568,20 +587,20 @@ def summarize_results(dirname, stats_languages=None):
     show("indentation_errors")
     show("exhausted_context_windows")
     show("test_timeouts")
-    print(f"  total_tests: {res.total_tests}")
+    print(f"  测试总数：{res.total_tests}")
 
     if variants["model"]:
         a_model = set(variants["model"]).pop()
         command = f"aider --model {a_model}"
-        print(f"  command: {command}")
+        print(f"  命令：{command}")
 
-    print(f"  date: {date}")
-    print("  versions:", ",".join(versions))
+    print(f"  日期：{date}")
+    print("  版本：", ",".join(versions))
 
     res.avg_duration = res.duration / res.completed_tests
-    print(f"  seconds_per_case: {res.avg_duration:.1f}")
+    print(f"  每个用例耗时（秒）：{res.avg_duration:.1f}")
 
-    print(f"  total_cost: {res.cost:.4f}")
+    print(f"  总费用：{res.cost:.4f}")
 
     res.avg_cost = res.cost / res.completed_tests
 
@@ -589,8 +608,8 @@ def summarize_results(dirname, stats_languages=None):
 
     print()
     print(
-        f"costs: ${res.avg_cost:.4f}/test-case, ${res.cost:.2f} total,"
-        f" ${projected_cost:.2f} projected"
+        f"费用：每个测试用例 ${res.avg_cost:.4f}，总计 ${res.cost:.2f}，"
+        f"预计总费用 ${projected_cost:.2f}"
     )
 
     console.rule()
@@ -638,7 +657,7 @@ def run_test(original_dname, testdir, *args, **kwargs):
         return run_test_real(original_dname, testdir, *args, **kwargs)
     except Exception as err:
         print("=" * 40)
-        print("Test failed")
+        print("测试失败")
         print(err)
         traceback.print_exc()
 
@@ -665,7 +684,7 @@ def run_test_real(
     read_model_settings=None,
 ):
     if not os.path.isdir(testdir):
-        print("Not a dir:", testdir)
+        print("不是目录：", testdir)
         return
 
     testdir = Path(testdir)
@@ -681,7 +700,7 @@ def run_test_real(
             # else:
             return res
         except JSONDecodeError:
-            print(f"{results_fname} failed to parse, redoing...")
+            print(f"{results_fname} 解析失败，正在重新运行……")
 
     # Read solution and test files from config
     fnames = []
@@ -736,7 +755,7 @@ def run_test_real(
                 os.makedirs(src.parent, exist_ok=True)
                 shutil.copy(original_fname, src)
         else:
-            print(f"Warning: Solution file not found: {src}")
+            print(f"警告：未找到解答文件：{src}")
 
     file_list = " ".join(fname.name for fname in fnames)
 
@@ -759,7 +778,7 @@ def run_test_real(
     )
 
     # weak_model_name = model_name
-    weak_model_name = None
+    weak_model_name = model_name
 
     main_model = models.Model(
         model_name,
@@ -779,7 +798,7 @@ def run_test_real(
     dump(main_model)
     dump(edit_format)
     show_fnames = ",".join(map(str, fnames))
-    print("fnames:", show_fnames)
+    print("文件名：", show_fnames)
 
     coder = Coder.create(
         main_model,
@@ -874,10 +893,10 @@ def run_test_real(
         try:
             shutil.rmtree(target_dir)
             if verbose:
-                print(f"Cleaned up Rust target/debug directory: {target_dir}")
+                print(f"已清理 Rust target/debug 目录：{target_dir}")
         except (OSError, shutil.Error, PermissionError) as e:
             if verbose:
-                print(f"Failed to clean up Rust target/debug directory: {e}")
+                print(f"清理 Rust target/debug 目录失败：{e}")
 
     # Java build directories
     java_build_dir = testdir / "build"
@@ -885,10 +904,10 @@ def run_test_real(
         try:
             shutil.rmtree(java_build_dir)
             if verbose:
-                print(f"Cleaned up Java build directory: {java_build_dir}")
+                print(f"已清理 Java 构建目录：{java_build_dir}")
         except (OSError, shutil.Error, PermissionError) as e:
             if verbose:
-                print(f"Failed to clean up Java build directory: {e}")
+                print(f"清理 Java 构建目录失败：{e}")
 
     # Node.js node_modules directories
     node_modules_dir = testdir / "node_modules"
@@ -896,10 +915,10 @@ def run_test_real(
         try:
             shutil.rmtree(node_modules_dir)
             if verbose:
-                print(f"Cleaned up Node.js node_modules directory: {node_modules_dir}")
+                print(f"已清理 Node.js node_modules 目录：{node_modules_dir}")
         except (OSError, shutil.Error, PermissionError) as e:
             if verbose:
-                print(f"Failed to clean up Node.js node_modules directory: {e}")
+                print(f"清理 Node.js node_modules 目录失败：{e}")
 
     results = dict(
         testdir=str(testdir),
@@ -967,7 +986,7 @@ def run_unit_tests(original_dname, testdir, history_fname, test_files):
         src = original_dname / Path(*testdir.parts[-4:]) / file_path
         dst = testdir / file_path
         if src.exists():
-            print("copying", src, dst)
+            print("正在复制", src, dst)
             os.makedirs(dst.parent, exist_ok=True)
             shutil.copy(src, dst)
 
@@ -1002,7 +1021,7 @@ def run_unit_tests(original_dname, testdir, history_fname, test_files):
         fh.write(f"```\n{res}\n```")
 
     if not success:
-        print(f"Tests failed: {testdir}")
+        print(f"测试失败：{testdir}")
         return res
 
 

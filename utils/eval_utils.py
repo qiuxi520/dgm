@@ -1,6 +1,6 @@
 import random
 # 中文导读：代理内部的测试报告整理和候选补丁比较；与外层的官方基准解题率不同。
-from llm import create_client, extract_json_between_markers, get_response_from_llm
+from llm import DEFAULT_MODEL, create_client, extract_json_between_markers, get_response_from_llm
 from llm_withtools import convert_msg_history
 from utils.swe_log_parsers import MAP_REPO_TO_PARSER
 
@@ -52,7 +52,7 @@ def get_report_score(test_report):
     return passed_count / total_count if total_count > 0 else 0
 
 def score_tie_breaker(problem_statement, code_diffs, test_reports, best_score_indices=[], logging=print):
-    # 多个候选得分相同时让 o1 辅助比较；若调用或解析失败，回退到首个候选。
+    # 多个候选得分相同时让配置中的模型辅助比较；调用或解析失败则回退。
     # 初始 coding_agent.forward 没有调用这些函数，它们可供后续进化工作流使用。
     """
     Use LLM as a tiebreaker to choose the best code diff.
@@ -60,7 +60,7 @@ def score_tie_breaker(problem_statement, code_diffs, test_reports, best_score_in
     best_score_indices = list(range(len(code_diffs))) if not best_score_indices else best_score_indices
     best_score_index = best_score_indices[0]
     try:
-        client = create_client('o1-2024-12-17')
+        client = create_client(DEFAULT_MODEL)
         proposed_solutions = [f'# Proposed solution {i+1}\n\n<code_diff_{i+1}>\n{code_diffs[index]}\n</code_diff{i+1}>\n<test_report_{i+1}>\n{test_reports[index]}\n</test_report_{i+1}>' for i, index in enumerate(best_score_indices)]
         proposed_solutions = '\n\n'.join(proposed_solutions)
         prompt = f"""Given the following problem statement, proposed solutions, and test reports, provide a summary of the differences between the code diffs and an evaluation of the proposed solutions.
@@ -98,5 +98,5 @@ Your response will be automatically parsed, so ensure that the string response i
         llm_best_score_index = random.choice([i for i, score in enumerate(llm_scores) if score == max(llm_scores)])
         best_score_index = best_score_indices[llm_best_score_index]
     except Exception as e:
-        logging(f"Error in score_tie_breaker: {e}")
+        logging(f"平分比较失败：{e}")
     return best_score_index

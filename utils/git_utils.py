@@ -12,7 +12,7 @@ def get_git_commit_hash(repo_path='.'):
         commit_hash = repo.head.commit.hexsha
         return commit_hash
     except Exception as e:
-        print("Error while getting git commit hash:", e)
+        print("获取 Git 提交哈希失败：", e)
         return None
 
 def apply_patch(git_dname, patch_str):
@@ -30,9 +30,9 @@ def apply_patch(git_dname, patch_str):
     )
     # Check if the patch was applied successfully
     if result.returncode != 0:
-        print(f"apply_patch error: Patch did not fully apply. Return code: {result.returncode}, stdout: {result.stdout}, stderr: {result.stderr}")
+        print(f"应用补丁失败：补丁未完全应用，返回码：{result.returncode}, 标准输出： {result.stdout}, 标准错误： {result.stderr}")
     else:
-        print("apply_patch successful")
+        print("补丁应用成功")
 
 def diff_versus_commit(git_dname, commit):
     # 已跟踪文件用 git diff <基线提交>；未跟踪新文件与空文件比较生成新增文件 diff。
@@ -85,9 +85,9 @@ def reset_to_commit(git_dname, commit):
         check=False
     )
     if result_reset.returncode != 0:
-        print(f"reset_to_commit error: Failed to reset {git_dname} to commit '{commit}'. STDOUT: {result_reset.stdout} STDERR: {result_reset.stderr}")
+        print(f"重置提交失败：无法将 {git_dname} 重置到提交 '{commit}'. 标准输出： {result_reset.stdout} 标准错误： {result_reset.stderr}")
     else:
-        print(f"reset_to_commit successful: {commit}")
+        print(f"提交重置成功：{commit}")
 
     # Step 2: Clean untracked files (the "new files") and directories
     clean_cmd = ["git", "-C", git_dname, "clean", "-fd"]
@@ -98,9 +98,9 @@ def reset_to_commit(git_dname, commit):
         check=False
     )
     if result_clean.returncode != 0:
-        print(f"reset_to_commit clean error: Failed to clean {git_dname}. STDOUT: {result_clean.stdout} STDERR: {result_clean.stderr}")
+        print(f"重置提交后清理目录失败：{git_dname}. 标准输出： {result_clean.stdout} 标准错误： {result_clean.stderr}")
     else:
-        print(f"reset_to_commit clean successful: {commit}")
+        print(f"重置提交后清理目录成功：{commit}")
 
 
 def filter_patch_by_files(patch_str, target_files):

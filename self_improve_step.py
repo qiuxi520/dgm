@@ -7,7 +7,7 @@ import json
 import os
 import docker
 
-from llm import create_client, get_response_from_llm, extract_json_between_markers
+from llm import DEFAULT_MODEL, create_client, get_response_from_llm, extract_json_between_markers, llm_environment
 from prompts.self_improvement_prompt import get_diagnose_prompt_polyglot, get_diagnose_prompt_swe, get_problem_description_prompt
 from prompts.diagnose_improvement_prompt import get_diagnose_improvement_prompt
 from prompts.testrepo_prompt import get_test_description
@@ -28,7 +28,7 @@ from utils.docker_utils import (
 )
 
 dataset = None
-diagnose_model = 'o1-2024-12-17'
+diagnose_model = DEFAULT_MODEL
 
 def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attempts=3, polyglot=False):
     # 从失败日志、代理源码和评测证据构造上下文，请模型提出一个通用能力改进。
@@ -54,13 +54,13 @@ def diagnose_problem(entry, commit, root_dir, out_dir, patch_files=[], max_attem
             print_debug=False,
             msg_history=None,
         )
-        safe_log(f"Message history: {msg_history}")
+        safe_log(f"消息历史：{msg_history}")
         response_json = extract_json_between_markers(response)
         assert response_json, "empty response json"
         problem_statement = get_problem_description_prompt(response_json, polyglot)
     except Exception as e:
         # Exception most probably due to not having json in the response
-        safe_log(f"Error while diagnosing the problem: {e}")
+        safe_log(f"问题诊断失败：{e}")
         if max_attempts > 0:
             return diagnose_problem(
                 entry, commit, root_dir, out_dir,
@@ -99,7 +99,7 @@ def diagnose_improvement(
         entry, parent_commit, root_dir, model_patch_file, out_dir, run_id, dataset,
         patch_files=patch_files,
     )
-    safe_log(f"Diagnosing the improvement: {diagnose_prompt}")
+    safe_log(f"正在诊断改进：{diagnose_prompt}")
     try:
         response, msg_history = get_response_from_llm(
             msg=diagnose_prompt,
@@ -109,13 +109,13 @@ def diagnose_improvement(
             print_debug=False,
             msg_history=None,
         )
-        safe_log(f"Message history: {msg_history}")
+        safe_log(f"消息历史：{msg_history}")
         response_json = extract_json_between_markers(response)
         assert response_json, "empty response json"
         improvement_diagnosis = response_json
     except Exception as e:
         # Exception most probably due to not having json in the response
-        safe_log(f"Error while diagnosing the improvement: {e}")
+        safe_log(f"改进诊断失败：{e}")
         if max_attempts > 0:
             return diagnose_improvement(
                 entry, parent_commit, root_dir, model_patch_file, out_dir, run_id,
@@ -135,7 +135,7 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
     # 两种补丁需要区分：patch_files 改的是代理自身；harness 输出改的是基准题仓库。
     # harness 先让新代理解题，make_report 再用 SWE-bench 官方测试判断题目是否解决。
     # num_evals 表示重复解题次数，用于观察随机性；结果按提交实例总数聚合为解题率。
-    safe_log('Start harness')
+    safe_log('开始运行评估框架')
     test_task_list = [entry] if test_task_list is None else test_task_list
     dnames = harness(
         test_task_list=test_task_list,
@@ -148,7 +148,7 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
         pred_dname=os.path.join(output_dir, "predictions"),
     )
     metadata['swe_dnames'] = [str(dn) for dn in dnames]
-    safe_log('Start make_report')
+    safe_log('开始生成评估报告')
     make_report(
         dnames,
         run_ids=[f"{run_id}_{i}" for i in range(len(dnames))],
@@ -156,10 +156,10 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
         output_dir=output_dir,
         dnames_workers=5,
     )
-    safe_log('Start get_performance')
+    safe_log('开始统计性能')
     performances, overall_performance = get_all_performance(model_name_or_path, results_dir=output_dir)
     metadata['overall_performance'] = overall_performance
-    safe_log("End of evaluation")
+    safe_log("评估结束")
 
     # Check if additional evaluation should be run
     # 达到阈值才扩展到 medium 子集以控制评估成本；这里比较成功实例数与题数乘阈值，
@@ -167,7 +167,7 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
     if (overall_performance and \
         test_more_threshold is not None and test_task_list_more is not None and \
             overall_performance.get('total_resolved_instances', 0) >= len(test_task_list) * test_more_threshold):
-        safe_log("Start additional evaluation cycle")
+        safe_log("开始额外评估轮次")
         dnames = harness(
             test_task_list=test_task_list_more,
             num_samples=-1,
@@ -178,7 +178,7 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
             num_evals_parallel=5,
             pred_dname=os.path.join(output_dir, "predictions"),
         )
-        safe_log('Start make_report more')
+        safe_log('开始生成额外评估报告')
         make_report(
             dnames,
             run_ids=[f"{run_id}_{i}" for i in range(len(dnames))],
@@ -186,18 +186,18 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
             output_dir=output_dir,
             dnames_workers=5,
         )
-        safe_log('Start get_performance')
+        safe_log('开始统计性能')
         performances, overall_performance = get_all_performance(model_name_or_path, results_dir=output_dir)
         metadata['overall_performance'] = overall_performance
-        safe_log("End of evaluation more")
+        safe_log("额外评估结束")
 
 def run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more):
     # Polyglot 在 harness 内直接测试和写报告，无需再调用 SWE 的 make_report。
     # 追加评估写入 overall_performance_deep；外层抽样仍读取 overall_performance。
     # 当前 Polyglot harness 显式限制 num_evals <= 1。
-    safe_log('Start harness')
+    safe_log('开始运行评估框架')
     test_task_list = [entry] if test_task_list is None else test_task_list
-    safe_log(f'workers {min(10, len(test_task_list))}')
+    safe_log(f'工作线程数：{min(10, len(test_task_list))}')
     dnames = polyglot_harness(
         test_task_list=test_task_list,
         num_samples=-1,
@@ -210,16 +210,16 @@ def run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, outp
         output_dir=output_dir
     )
     metadata['swe_dnames'] = [str(dn) for dn in dnames]
-    safe_log('Start get_performance')
+    safe_log('开始统计性能')
     performances, overall_performance = get_all_performance(model_name_or_path, results_dir=output_dir)
     metadata['overall_performance'] = overall_performance
-    safe_log("End of evaluation")
+    safe_log("评估结束")
 
     # Check if additional evaluation should be run
     if (overall_performance and \
         test_more_threshold is not None and test_task_list_more is not None and \
             overall_performance.get('total_resolved_instances', 0) >= len(test_task_list) * test_more_threshold):
-        safe_log("Start additional evaluation cycle")
+        safe_log("开始额外评估轮次")
         dnames = polyglot_harness(
             test_task_list=test_task_list_more,
             num_samples=-1,
@@ -232,10 +232,10 @@ def run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, outp
             output_dir=output_dir
         )
         # metadata['swe_dnames'] = [str(dn) for dn in dnames]
-        safe_log('Start get_performance')
+        safe_log('开始统计性能')
         performances, overall_performance = get_all_performance(model_name_or_path, results_dir=output_dir)
         metadata['overall_performance_deep'] = overall_performance
-        safe_log("End of evaluation more")
+        safe_log("额外评估结束")
 
 def self_improve(
     parent_commit='initial',  # 'initial' if starting from original dgm, else the run_id
@@ -341,11 +341,11 @@ def self_improve(
     # Get tasks to improve
     # 先解释“代理为什么失败”，再把改进任务交给代理实现；不是直接照抄题目答案。
     if entry:
-        safe_log(f"Task to improve: {entry}")
+        safe_log(f"待改进任务：{entry}")
         problem_statement = diagnose_problem(entry, parent_commit, root_dir, out_dir_base, patch_files=patch_files, polyglot=polyglot)
-        safe_log(f"problem_statement: {problem_statement}")
+        safe_log(f"问题描述：{problem_statement}")
     else:
-        safe_log("No entry provided. Exiting.")
+        safe_log("未提供任务，退出。")
         cleanup_container(container)
         save_metadata(metadata, output_dir)
         return metadata
@@ -354,23 +354,16 @@ def self_improve(
     metadata['problem_statement'] = problem_statement
     # If problem statement is not found, exit
     if not problem_statement:
-        safe_log("Failed to diagnose the problem statement. Exiting.")
+        safe_log("问题描述诊断失败，退出。")
         cleanup_container(container)
         save_metadata(metadata, output_dir)
         return metadata
 
     # Run self-improvement
-    safe_log("Running self-improvement")
+    safe_log("正在执行自改进")
     chat_history_file_container = "/dgm/self_evo.md"
     test_description = get_test_description(swerepo=False)
-    env_vars = {
-        "ANTHROPIC_API_KEY": os.getenv('ANTHROPIC_API_KEY'),
-        "AWS_REGION": os.getenv('AWS_REGION'),
-        "AWS_REGION_NAME": os.getenv('AWS_REGION_NAME'),
-        "AWS_ACCESS_KEY_ID": os.getenv('AWS_ACCESS_KEY_ID'),
-        "AWS_SECRET_ACCESS_KEY": os.getenv('AWS_SECRET_ACCESS_KEY'),
-        "OPENAI_API_KEY": os.getenv('OPENAI_API_KEY'),
-    }
+    env_vars = llm_environment()
     cmd = [
         # 同一个编程代理也能编辑自己的实现：--git_dir 从解题时的 /testbed/
         # 换成 /dgm/，目标变为工具、提示词和工作流；30 分钟超时由 Linux timeout 执行。
@@ -403,7 +396,7 @@ def self_improve(
             if not patch_content.strip():
                 raise Exception("Model patch file is empty")
     except Exception as e:
-        safe_log(f"Failed to read model patch file: {str(e)}")
+        safe_log(f"读取模型补丁文件失败：{str(e)}")
         save_metadata(metadata, output_dir)
         return metadata
 
@@ -426,26 +419,26 @@ def self_improve(
             else:
                 run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
         except Exception as e:
-            safe_log(f"Error while evaluating the self-improvement: {e}")
+            safe_log(f"自改进评估失败：{e}")
 
     # Post-self-improvement diagnosis
     # 性能结论由基准结果提供；这里的模型文字诊断是辅助解释，不能替代测试分数。
     # 直接调用 is_compiled_self_improve 未传 logger 和非空题数列表，当前实现存在
     # None.info / 空列表索引风险；外层 filter_compiled 的调用则提供了这些参数。
     if post_improve_diagnose:
-        safe_log("Diagnosing the self-improvement")
+        safe_log("正在诊断自改进")
         metadata['is_compiled'] = is_compiled_self_improve(metadata)
         if metadata['is_compiled']:
-            safe_log("The self-improvement succeed to be complied")
+            safe_log("自改进代码通过编译")
             improvement_diagnosis = diagnose_improvement(
                 entry, parent_commit, root_dir,
                 model_patch_file, out_dir_base, run_id,
                 patch_files=patch_files,
             )
             metadata['improvement_diagnosis'] = improvement_diagnosis
-            safe_log(f"Improvement diagnosis: {improvement_diagnosis}")
+            safe_log(f"改进诊断：{improvement_diagnosis}")
         else:
-            safe_log("The self-improvement fail to be complied")
+            safe_log("自改进代码未通过编译")
             metadata['improvement_diagnosis'] = "Fail to complied. Ignore this."
 
     # Save metadata of this self-improvement attempt

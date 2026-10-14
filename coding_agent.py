@@ -65,7 +65,7 @@ def safe_log(message, level=logging.INFO):
     if logger:
         logger.log(level, message)
     else:
-        print(f"Warning: No logger found for thread {threading.get_ident()}")
+        print(f"警告：未找到线程的日志记录器，线程 ID：{threading.get_ident()}")
 
 class AgenticSystem:
     # 保存任务、目标仓库、Git 基线和日志配置；基础模型权重不在该类中更新。
@@ -86,7 +86,7 @@ class AgenticSystem:
         self.test_description = test_description
         self.self_improve = self_improve
         self.instance_id = instance_id if not self_improve else 'dgm'
-        # SWE 版本无论解题还是自修改都使用 CLAUDE_MODEL；与 Polyglot 的模型选择不同。
+        # 解题与自修改均使用环境配置中的模型；常量名保留以兼容历史补丁。
         self.code_model = CLAUDE_MODEL
 
         # Initialize logger and store it in thread-local storage

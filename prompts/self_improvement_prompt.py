@@ -193,6 +193,7 @@ def read_mdlog_file(filepath, filter=True):
     # Filter out unwanted strings from the log file
     filter_content = [
         'Error in get_response_withtools',
+        '工具调用模型请求失败：',
     ]
     filtered_lines = []
     with open(filepath, 'r') as f:
