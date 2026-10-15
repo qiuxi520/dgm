@@ -107,7 +107,7 @@ def create_archive(path: Union[str, Path], data: Optional[bytes] = None) -> byte
 def build_dgm_container(
         client,
         repo_path='./',
-        image_name='app',
+        image_name='dgm:latest',
         container_name='app-container',
         force_rebuild=False,
     ):
@@ -117,8 +117,14 @@ def build_dgm_container(
     Build the Docker image for the dgm app and start a container from it.
     """
     try:
-        # Build the Docker image if force_rebuild is set or the image doesn't exist
-        if force_rebuild or not any(image.tags for image in client.images.list() if image_name in image.tags):
+        # Docker 的 get 接口支持完整标签，也能将省略标签的名称解析为 :latest。
+        image = None
+        if not force_rebuild:
+            try:
+                image = client.images.get(image_name)
+            except docker.errors.ImageNotFound:
+                pass
+        if image is None:
             safe_log("正在构建 Docker 镜像……")
             image, logs = client.images.build(path=repo_path, tag=image_name, rm=True)
             for log_entry in logs:
@@ -127,8 +133,6 @@ def build_dgm_container(
             safe_log("镜像构建成功。")
         else:
             safe_log(f"Docker 镜像 '{image_name}' 已存在，跳过构建。")
-            # Fetch the existing image
-            image = next((img for img in client.images.list() if image_name in img.tags), None)
     except Exception as e:
         safe_log(f"构建 Docker 镜像失败：{e}")
         return None

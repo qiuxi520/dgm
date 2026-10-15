@@ -72,6 +72,20 @@ python -m polyglot.prepare_polyglot_dataset
 默认通过 DeepSeek Chat Completions 调用原生工具，并在后续工具请求中回传 `reasoning_content`。模型和客户端配置见 [`llm.py`](llm.py)，编程工具循环见 [`llm_withtools.py`](llm_withtools.py)。修改源码后，应重新构建已有的 DGM 镜像：`docker build -t dgm .`。
 
 ## 运行 DGM
+
+SWE-bench 默认解题/验收并发为 1（可用 `--eval_workers` 调整），环境与题目镜像构建始终串行，避免低内存机器同时运行多个 conda 构建进程。构建会继承 `HTTP_PROXY` / `HTTPS_PROXY`；Linux 上代理监听 localhost 时自动使用宿主机网络，也可用 `.env` 的 `SWE_BUILD_NETWORK` 指定。镜像构建不会接收模型 API 密钥。
+
+若一次自改进已生成补丁，但评估因网络或环境问题失败，可复用节点目录重试，无需再次生成改进：
+
+```bash
+# 仅准备环境，不调用模型
+python -m swe_bench.retry_run --node output_dgm/<实验目录>/<节点目录> --prepare-only
+# 复用原有补丁完成 small 子集评估（会调用模型）
+python -m swe_bench.retry_run --node output_dgm/<实验目录>/<节点目录> --eval_workers 1
+```
+
+重试会更新节点的 `metadata.json`，保留原补丁，并复用已存在的预测结果；不会自动修改原实验的进化档案。构建或评估失败会报告具体错误，不会被当作有效的零分结果。
+
 ```bash
 python DGM_outer.py
 ```

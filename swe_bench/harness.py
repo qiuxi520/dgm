@@ -24,6 +24,7 @@ from swe_bench.utils import (
     setup_logger,
 )
 from utils.common_utils import load_json_file
+from swe_bench.build_config import configure_build_client
 
 def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
     # 每题一个容器，先装入初始代理并叠加 model_patch_paths，恢复待测版本；
@@ -44,14 +45,17 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
         print(f"跳过已有任务 {instance_id}")
         return {"success": True, "instance_id": instance_id}
 
+    client = container = logger = None
     try:
         # Create and start the Docker container
-        client = docker.from_env()
+        client = configure_build_client(docker.from_env())
         run_id = datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')
         # Set up thread-specific logger
         logger = setup_logger(str(out_dname / f"{instance_id}_docker.log"))
-        nocache = True
+        nocache = False
         test_spec = make_test_spec(entry)
+        # 避免本次遇到的 GitHub HTTP/2 流取消；不改变题目或基准提交。
+        test_spec.repo_script_list.insert(0, 'git config --global http.version HTTP/1.1')
         # Remove any existing container with the same name
         container_name = test_spec.get_instance_container_name(run_id)
         remove_existing_container(client, container_name)
@@ -177,14 +181,18 @@ def process_entry(entry, out_dname, model_name_or_path, model_patch_paths):
     finally:
         # Clean up docker container
         try:
-            cleanup_container(client, container, logger)
+            if container is not None:
+                cleanup_container(client, container, logger)
         except Exception as e:
             print(f"清理任务 Docker 容器失败 {instance_id}: {e}")
+        finally:
+            if client is not None:
+                client.close()
 
 def harness(
         test_task_list=None,
         num_samples=-1,
-        max_workers=4,
+        max_workers=1,
         model_name_or_path=None,
         model_patch_paths=None,
         num_evals=1,
@@ -224,8 +232,15 @@ def harness(
         entries = entries[:num_samples]
 
     # Build the environment images
-    client = docker.from_env()
-    build_env_images(client, dataset=entries, force_rebuild=False, max_workers=max_workers)
+    if not entries:
+        raise ValueError('没有匹配的 SWE-bench 任务。')
+    client = configure_build_client(docker.from_env())
+    try:
+        _, failed = build_env_images(client, dataset=entries, force_rebuild=False, max_workers=1)
+    finally:
+        client.close()
+    if failed:
+        raise RuntimeError(f'SWE-bench 环境镜像构建失败：{failed}；请检查 logs/build_images/env。')
     
     # Define a function to handle a single evaluation for all specified issues
     def process_evaluation(eval_idx):
@@ -236,6 +251,7 @@ def harness(
         print(f"开始模型 {model_name_or_path} 的第 {eval_idx} 次评估")
         
         # Process entries in parallel
+        failures = []
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             # Submit all tasks
             future_to_entry = {
@@ -249,7 +265,11 @@ def harness(
                 if result["success"]:
                     print(f"第 {eval_idx} 次评估成功处理任务 {result['instance_id']}")
                 else:
+                    failures.append(result)
                     print(f"第 {eval_idx} 次评估处理任务 {result['instance_id']} 失败：{result.get('error', '未知错误')}")
+        if failures:
+            details = '; '.join(f"{r['instance_id']}: {r.get('error', '未知错误')}" for r in failures)
+            raise RuntimeError(f'{len(failures)} 个题目运行失败，评估未完成：{details}')
         return out_dname
 
     # Process all evaluations in parallel
@@ -263,7 +283,7 @@ def main():
     # Parse command line arguments
     parser = argparse.ArgumentParser()
     parser.add_argument("--num_samples", type=int, default=-1, help="Number of samples to process")
-    parser.add_argument("--max_workers", type=int, default=4, help="Maximum number of concurrent threads")
+    parser.add_argument("--max_workers", type=int, default=1, help="Maximum number of concurrent threads")
     parser.add_argument("--model_name_or_path", type=str, default=None, help="Model name or path")
     parser.add_argument("--model_patch_paths", type=str, default=None, help="Paths to the model patches")
     parser.add_argument("--num_evals", type=int, default=1, help="Repeated number of swe evaluations")

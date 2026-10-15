@@ -258,7 +258,8 @@ def main():
     parser = argparse.ArgumentParser(description="Darwin Godel Machine!")
     parser.add_argument("--max_generation", type=int, default=80, help="Maximum number of evolution iterations.")
     parser.add_argument("--selfimprove_size", type=int, default=2, help="Number of self-improvements attempts per DGM generation.")
-    parser.add_argument("--selfimprove_workers", type=int, default=2, help="Number of parallel workers for self-improvement attempts.")
+    parser.add_argument("--selfimprove_workers", type=int, default=1, help="Number of parallel workers for self-improvement attempts.")
+    parser.add_argument("--eval_workers", type=int, default=1, help="SWE-bench 解题和官方评估并发数；环境镜像构建固定串行。")
     parser.add_argument(
         "--choose_selfimproves_method", type=str, default='score_child_prop',
         choices=['random', 'score_prop', 'score_child_prop' 'best'],
@@ -278,6 +279,8 @@ def main():
     # baselines
     parser.add_argument("--run_baseline", type=str, default=None, choices=['no_selfimprove', 'no_darwin'], help="Baseline to run.")
     args = parser.parse_args()
+    if args.eval_workers < 1:
+        parser.error('--eval_workers 必须大于等于 1')
 
     # Variables for this DGM run
     if not args.continue_from:
@@ -326,6 +329,7 @@ def main():
                     output_dir=output_dir,
                     force_rebuild=False,
                     num_evals=args.num_swe_evals,
+                    eval_workers=args.eval_workers,
                     post_improve_diagnose=args.post_improve_diagnose,
                     entry=entry,
                     test_task_list=swe_issues_sm,

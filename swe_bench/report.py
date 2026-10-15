@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 
 def load_predictions(paths):
@@ -84,20 +85,17 @@ def preds_to_jsonl(dname, predictions):
             fh.write(json.dumps(minimal_pred) + "\n")
     return predictions_jsonl
 
-def run_evals(predictions_jsonl, run_id, dataset_name, root_dir, output_dir, num_eval_procs=5):
-    # 官方评估器负责应用补丁并运行测试；切换目录用于把报告保存到指定节点目录。
-    # 注意 os.chdir 修改进程全局目录，在线程并发时不是线程局部状态。
-    os.chdir(output_dir)  # switch dir so that things will be saved in the specified output_dir
-    run_evals_cmd = f"""
-python {os.path.join(root_dir, './swe_bench/SWE-bench/swebench/harness/run_evaluation.py')}
-    --dataset_name {dataset_name}
-    --predictions_path {predictions_jsonl}
-    --max_workers {num_eval_procs}
-    --run_id {run_id}
-"""
-    run_evals_cmd = " ".join([line.strip() for line in run_evals_cmd.split() if line.strip()])
-    subprocess.run(run_evals_cmd.split(), check=True)
-    os.chdir(root_dir)  # switch back to the original directory
+def run_evals(predictions_jsonl, run_id, dataset_name, root_dir, output_dir, num_eval_procs=1):
+    # 使用当前 conda 解释器，并仅为子进程设置工作目录，避免线程间互相影响。
+    run_evals_cmd = [
+        sys.executable,
+        os.path.join(root_dir, 'swe_bench/SWE-bench/swebench/harness/run_evaluation.py'),
+        '--dataset_name', dataset_name,
+        '--predictions_path', str(predictions_jsonl),
+        '--max_workers', str(num_eval_procs),
+        '--run_id', run_id,
+    ]
+    subprocess.run(run_evals_cmd, check=True, cwd=output_dir)
 
 def make_report(
         dnames,
@@ -105,7 +103,7 @@ def make_report(
         dataset_name="princeton-nlp/SWE-bench_Verified",
         output_dir='./swe_bench',
         dnames_workers=None,
-        num_eval_procs=5,
+        num_eval_procs=1,
     ):
     """
     Generate reports for multiple directories in parallel.
@@ -121,6 +119,8 @@ def make_report(
     def process_single_dname(dname, run_id):
         dname = Path(os.path.join(root_dir, dname))
         predictions = load_predictions([dname])
+        if not predictions:
+            raise RuntimeError(f'预测目录 {dname} 为空，不能生成有效评估报告。')
         predictions_jsonl = preds_to_jsonl(dname, predictions)
         run_evals(predictions_jsonl, run_id, dataset_name, root_dir, output_dir, num_eval_procs=num_eval_procs)
         print(f"已生成报告：{dname}")
@@ -131,7 +131,8 @@ def make_report(
     if dnames_workers is None:
         dnames_workers = len(dnames)
     with ThreadPoolExecutor(max_workers=dnames_workers) as executor:
-        executor.map(process_single_dname, dnames, run_ids)
+        # 消费结果才能将子线程异常传回调用方，避免失败仍显示“全部报告已生成”。
+        list(executor.map(process_single_dname, dnames, run_ids))
 
     print("全部报告已生成。")
 
@@ -141,7 +142,7 @@ def main():
     parser.add_argument('--run_ids', type=str, nargs='+', default=None, help="Run ID for this evaluation run.")
     parser.add_argument('--dataset_name', type=str, default="princeton-nlp/SWE-bench_Verified", help="Name of the dataset to evaluate on.")
     parser.add_argument('--dnames_workers', type=int, default=None, help="Number of parallel workers to use for processing dnames.")
-    parser.add_argument('--num_eval_procs', type=int, default=5, help="Number of parallel processes to use for evaluation.")
+    parser.add_argument('--num_eval_procs', type=int, default=1, help="Number of parallel processes to use for evaluation.")
     parser.add_argument('--output_dir', type=str, default='./swe_bench', help="Output directory for the reports.")
     args = parser.parse_args()
 

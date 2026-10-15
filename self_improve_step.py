@@ -131,7 +131,7 @@ def save_metadata(metadata, output_dir):
     with open(metadata_file, 'w') as f:
         json.dump(metadata, f, indent=4)
 
-def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more):
+def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more, eval_workers=1):
     # 两种补丁需要区分：patch_files 改的是代理自身；harness 输出改的是基准题仓库。
     # harness 先让新代理解题，make_report 再用 SWE-bench 官方测试判断题目是否解决。
     # num_evals 表示重复解题次数，用于观察随机性；结果按提交实例总数聚合为解题率。
@@ -140,11 +140,11 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
     dnames = harness(
         test_task_list=test_task_list,
         num_samples=-1,
-        max_workers=min(5, len(test_task_list)),
+        max_workers=min(eval_workers, len(test_task_list)),
         model_name_or_path=model_name_or_path,
         model_patch_paths=patch_files,
         num_evals=num_evals,
-        num_evals_parallel=5,
+        num_evals_parallel=1,
         pred_dname=os.path.join(output_dir, "predictions"),
     )
     metadata['swe_dnames'] = [str(dn) for dn in dnames]
@@ -154,11 +154,14 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
         run_ids=[f"{run_id}_{i}" for i in range(len(dnames))],
         dataset_name="princeton-nlp/SWE-bench_Verified",
         output_dir=output_dir,
-        dnames_workers=5,
+        dnames_workers=1,
+        num_eval_procs=eval_workers,
     )
     safe_log('开始统计性能')
     performances, overall_performance = get_all_performance(model_name_or_path, results_dir=output_dir)
     metadata['overall_performance'] = overall_performance
+    if overall_performance is None:
+        raise RuntimeError('未生成 SWE-bench 性能报告，评估未完成。')
     safe_log("评估结束")
 
     # Check if additional evaluation should be run
@@ -171,11 +174,11 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
         dnames = harness(
             test_task_list=test_task_list_more,
             num_samples=-1,
-            max_workers=min(5, len(test_task_list_more)),
+            max_workers=min(eval_workers, len(test_task_list_more)),
             model_name_or_path=model_name_or_path,
             model_patch_paths=patch_files,
             num_evals=num_evals,
-            num_evals_parallel=5,
+            num_evals_parallel=1,
             pred_dname=os.path.join(output_dir, "predictions"),
         )
         safe_log('开始生成额外评估报告')
@@ -184,11 +187,14 @@ def run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_di
             run_ids=[f"{run_id}_{i}" for i in range(len(dnames))],
             dataset_name="princeton-nlp/SWE-bench_Verified",
             output_dir=output_dir,
-            dnames_workers=5,
+            dnames_workers=1,
+            num_eval_procs=eval_workers,
         )
         safe_log('开始统计性能')
         performances, overall_performance = get_all_performance(model_name_or_path, results_dir=output_dir)
         metadata['overall_performance'] = overall_performance
+        if overall_performance is None:
+            raise RuntimeError('未生成额外 SWE-bench 性能报告，评估未完成。')
         safe_log("额外评估结束")
 
 def run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more):
@@ -251,7 +257,8 @@ def self_improve(
     full_eval_threshold=None,
     # Run baseline
     run_baseline=None,
-    polyglot=False
+    polyglot=False,
+    eval_workers=1,
 ):  
     # parent_commit 实际是档案节点 ID（initial 或时间戳），不是 Git commit hash。
     # 每个节点目录保存相对父代的增量，重建时必须按祖先到父代的顺序应用整条补丁链。
@@ -282,7 +289,7 @@ def self_improve(
     logger = setup_logger(os.path.join(output_dir, "self_improve.log"))
 
     # Create and start the Docker container
-    image_name = "dgm"
+    image_name = "dgm:latest"
     container_name = f"dgm-container-{run_id}"
     client = docker.from_env()
     # Remove any existing container with the same name
@@ -415,10 +422,11 @@ def self_improve(
     if model_patch_exists and model_patch_notempty:
         try:
             if not polyglot:
-                run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
+                run_harness_swe(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more, eval_workers=eval_workers)
             else:
                 run_harness_polyglot(entry, model_name_or_path, patch_files, num_evals, output_dir, metadata, run_id, test_more_threshold, test_task_list, test_task_list_more)
         except Exception as e:
+            metadata['evaluation_error'] = str(e)
             safe_log(f"自改进评估失败：{e}")
 
     # Post-self-improvement diagnosis

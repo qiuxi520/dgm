@@ -28,9 +28,13 @@ def setup_logger(log_file):
     logger_name = f'docker_logger_{thread_id}'
     logger = logging.getLogger(logger_name)
     logger.setLevel(logging.INFO)
+    # SWE-bench 的 BuildImageError 和清理函数依赖这两个属性。
+    logger.log_file = str(log_file)
+    logger.log_file_path = str(log_file)
     
     # Clear existing handlers
     for handler in logger.handlers:
+        handler.close()
         logger.removeHandler(handler)
 
     # Create file handler with lock
