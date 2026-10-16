@@ -167,7 +167,7 @@ def choose_selfimproves(output_dir, archive, selfimprove_size, method='random', 
                 continue
 
             # Choose a random unresolved entry
-            if unresolved_ids == 0:
+            if not unresolved_ids:
                 # 注意 unresolved_ids 来自列表字段，列表与整数 0 的比较不能判断空列表；
                 # 若列表为空，后面的 random.choice 会报错。此处保留原行为供学习对照。
                 continue
@@ -262,7 +262,7 @@ def main():
     parser.add_argument("--eval_workers", type=int, default=1, help="SWE-bench 解题和官方评估并发数；环境镜像构建固定串行。")
     parser.add_argument(
         "--choose_selfimproves_method", type=str, default='score_child_prop',
-        choices=['random', 'score_prop', 'score_child_prop' 'best'],
+        choices=['random', 'score_prop', 'score_child_prop', 'best'],
         # 注意：上面相邻字符串缺少逗号，会被 Python 拼接为 score_child_propbest。
         # 默认值仍是 score_child_prop，但显式传入同名参数会被 argparse 拒绝。
         help="Method to choose self-improve attempts.",
